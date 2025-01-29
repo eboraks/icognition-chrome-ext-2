@@ -1,31 +1,23 @@
 <template>
-    <div class="panel mb-3">
+    <div class="panel">
         <p class="flex text-xs justify-content-end">{{moment(qanda?.created_at).format('DD MMM YYYY h:mm a')}}</p>
         <div class="card">
             <Card class="border-1 border-round border-300 bg-white shadow-3">
                 <template #header>
-                    <div class="border-1 border-round border-300 surface-300 flex border-bottom-1 border-noround-bottom border-top-none border-left-none border-right-none">
-                        <p class="flex-grow-1 px-1 py-1 text-sm border-round font-semibold">{{qanda?.question}}</p>
+                    <div class="header-wrapper border-1 border-round border-300 surface-300 flex border-bottom-1 border-noround-bottom border-top-none border-left-none border-right-none">
+                        <p class="header-text flex-grow-1 text-sm border-round font-semibold">{{qanda?.question}}</p>
                         <div icon="pi pi-times" 
-                            class="bg-transparent border-transparent border-0 flex-shrink-0 text-black-alpha-90 p-3" 
+                            class="bg-transparent border-transparent border-0 flex-shrink-0 text-black-alpha-90" 
                             size="small" aria-label="Close" @click="handleQandARemove(uuid)">x</div>
                     </div>
                 </template>
-                <template #content class="">
-                    <div v-if="qanda?.status == null">
+                <template #content>
+                    <div v-if="qanda?.status == null" class="content-wrapper">
                         <div>Loading...</div>
                     </div>
-                    <div class="bg-white flex flex-column">
-                        <div class="flex-row mx-0">
-                            <p v-if="is_answer_include_html" class="flex-grow-1 py-0 text-sm text-black-alpha-90 border-round" v-html="qanda?.answer"></p>
-                            <p v-else class="flex-grow-1 py-0 text-sm text-black-alpha-90 border-round">{{qanda?.answer}}</p>
-                        </div>
-                        <div class="flex-row mx-1">
-                            
-                            <Button v-if="qanda?.status === 'COMPLETED_NO_SAVE'" 
-                                type="button" class="bg-transparent border-transparent border-0 text-500 flex-shrink-0 align-content-start flex-wrap pb-0 pr-0" 
-                                size="large" aria-label="Save" icon="pi pi-save" />
-                        </div>
+                    <div class="content-wrapper bg-white">
+                        <p v-if="is_answer_include_html" class="answer-text" v-html="qanda?.answer"></p>
+                        <p v-else class="answer-text">{{qanda?.answer}}</p>
                     </div>
                 </template>
             </Card>
@@ -75,5 +67,35 @@
         color: #dc3545;
     }
 
+    .content-wrapper {
+        padding: 0.5rem;
+        margin: 0;
+    }
+
+    .answer-text {
+        margin: 0;
+        line-height: 1.4;
+    }
+
+    /* Make sure the Card content has minimal padding */
+    :deep(.p-card-content) {
+        padding: 0 !important;
+    }
+
+    .header-wrapper {
+        padding: 0.5rem;
+        margin: 0;
+    }
+
+    .header-text {
+        margin: 0;
+        padding: 0;
+        line-height: 1.4;
+    }
+
+    /* Override PrimeVue's default header padding */
+    :deep(.p-card-header) {
+        padding: 0 !important;
+    }
 
 </style>

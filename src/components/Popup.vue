@@ -2,7 +2,9 @@
     <div style="width: 450px; height: 200px">        
         <div class="header bg-primary-800 w-full h-20">
             <div class="flex justify-content-between align-items-center">
-                <img src="/icons/iCognitionLogo.png" alt="iCognition Logo"  width="150px" class="m-2"/>
+                <a :href="library_url" target="_blank">
+                    <img src="/icons/iCognitionLogo.png" alt="iCognition Logo" width="150px" class="m-2"/>
+                </a>
                 <div class="pi pi-sign-out text-white mr-4 flex align-items-center" v-if="user" @click="handleSignOut"></div>
             </div>
 
@@ -12,9 +14,7 @@
             <ProgressBar mode="indeterminate"></ProgressBar>
             <p>Starting service...</p>
             </div>
-            <div v-if="server_status === false" class="flex align-items-center justify-content-center m-2 p-2">
-                <ProgressBar mode="indeterminate"></ProgressBar>
-            </div>
+            
 
             <div v-if="server_status == 'down'" class="message_container flex align-items-center justify-content-center">
                 <p class="error">Error connecting to server</p>
@@ -25,13 +25,13 @@
                 <ProgressBar :value="progressPercent"></ProgressBar>
             </div>
 
-            <div v-if="server_status =='up'" class="flex align-items-center justify-content-center m-2 p-2">
-                <div v-if="!user" class="button_container">
+            <div v-if="server_status =='up'">
+                <div v-if="!user" class="button_container flex align-items-center justify-content-center m-2 p-2">
                     <GoogleLoginButton></GoogleLoginButton>
                 </div>
             </div>
 
-            <div v-if="bookmark_status == BookmarkStatusEnum.ADD_TO_ICOGNITION && user != null" class="flex align-items-center justify-content-center m-2 p-2">
+            <div v-if="bookmark_status == BookmarkStatusEnum.ADD_TO_ICOGNITION && user != null" class="flex align-items-center justify-content-center m-2 p-2 Peter">
                 <Button @click="handleBookmark" label="Add to Library" icon="pi pi-plus" class="flex"></Button>
             </div>
 
@@ -60,12 +60,6 @@
 
         <div v-if="error_bookmark" class="message_container">
             <p class="error">{{ error_bookmark }}</p>
-        </div>
-        <div class="absolute bottom-0 left-0 m-2">
-            <a :href="library_url" target="_blank" class="flex align-items-center text-primary no-underline">
-            <i class="pi pi-external-link mr-2"></i>
-            Open iCognition Library
-            </a>
         </div>
 
         <div v-if="debug_mode" class="debug">
@@ -169,6 +163,7 @@ chrome.storage.session.get(["session_user"]).then((session_user) => {
 watch(user, (after, before) => {
     if (after !== undefined && after !== null) {
         console.log('User logged in! ', user.value)
+
     }else if (after === undefined || after === null) {
         console.log('User logged out!')
         //Remove bookmarks from local storage
@@ -271,6 +266,13 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
                 bookmarks.value = []
             } else {
                 bookmarks.value = newValue
+
+                // After assigning bookmarks, search for bookmarks by active URL, if exists display the document
+                chrome.tabs.query({ active: true, lastFocusedWindow: true }).then((tabs) => {
+                    active_tab.value = tabs[0]
+                    console.log('Popup -> Session_User -> active_tab:', active_tab.value)
+                    searchBookmarksByUrl(active_tab.value.url)
+                })
             }
         }
   }

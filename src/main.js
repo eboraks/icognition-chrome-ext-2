@@ -10,6 +10,9 @@ import TabView from 'primevue/tabview';
 import TabPanel from 'primevue/tabpanel';
 import ProgressBar from 'primevue/progressbar';
 import Skeleton from 'primevue/skeleton';
+import Card from 'primevue/card';
+import InputText from 'primevue/inputtext';
+import ScrollPanel from 'primevue/scrollpanel';
 
 const app = createApp(App);
 app.use(PrimeVue);
@@ -18,4 +21,7 @@ app.component('TabView', TabView);
 app.component('TabPanel', TabPanel);
 app.component('ProgressBar', ProgressBar);
 app.component('Skeleton', Skeleton);
+app.component('Card', Card);
+app.component('InputText', InputText);
+app.component('ScrollPanel', ScrollPanel);
 app.mount('#app');

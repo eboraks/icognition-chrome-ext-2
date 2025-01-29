@@ -8,11 +8,11 @@
                     <Skeleton width="5rem" class='mb-2'></Skeleton>
                 </div>
 
-                <div v-else class="flex-column mx-2 my-2 mt-3 w-full border-round border-2 border-blue-100 bg-white">
-                    <div class="overflow-y-auto pr-3 py-3" style="height: calc(100% - 49.6px);">
-                    <p class="pl-3 pb-3 line-height-2" v-if="doc != null && doc.is_about != null">{{ doc.is_about }}</p>
+                <div v-else class="flex-columnw-full border-round border-2 border-blue-100 bg-white p-2">
+                    <div class="overflow-y-auto" style="height: calc(100% - 49.6px);">
+                    <p class="line-height-2" v-if="doc != null && doc.is_about != null">{{ doc.is_about }}</p>
                     <div v-if="doc != null && doc.tldr != null">
-                        <p class="pl-3">Key Points:</p>
+                        <p class="pl-1">Key Points:</p>
                         <ul>
                         <li v-for="item in doc.tldr" :key="item">{{ item }}</li>
                         </ul>
@@ -20,32 +20,43 @@
                     </div>
                 </div>
             </TabPanel>
-            <TabPanel header="Ask iCongition">
-                <div class="pr-3 py-3" style="height: calc(100% - 49.6px);">
-                    <div v-if="qanda_status == 'ready'">
-                        <div v-for="item in qanda" :key="item.id">
-                            <QuestionAnswerCard :qanda="item" :uuid="item.uuid" @remove="handleQandARemove"/>
-                        </div>
+            <TabPanel header="Ask iCognition">
+                <div class="flex flex-column relative" style="height: 400px">
+                    <div class="flex-grow-1 overflow-hidden">
+                        <ScrollPanel class="h-full">
+                            <div v-if="qanda_status == 'ready'" class="p-2">
+                                <div v-for="item in qanda" :key="item.id">
+                                    <QuestionAnswerCard :qanda="item" :uuid="item.uuid" @remove="handleQandARemove"/>
+                                </div>
+                            </div>
+                        </ScrollPanel>
+                    </div>
                     
-                        <div v-if="processing_question">
+                    <div class="flex-none border-top-1 surface-border bg-white p-2">
+                        <div v-if="processing_question" class="p-2">
                             <div>Loading...</div>
                         </div>
-                        <div v-else ref="ask_question_input" class="flex flex-row m-2 p-2 pr-0 bg-white">
-                            <InputText @keyup.enter="handleAsk" class="flex p-1 m-2 w-10" type="text" v-model="question" />
-                            <div class="flex m-2 p-2 bg-primary-500 border-round" label="Ask" @click="handleAsk">Ask</div>
+                        <div v-else ref="ask_question_input" class="flex flex-row align-items-center">
+                            <InputText @keyup.enter="handleAsk" 
+                                     class="flex-grow-1 p-2 mr-2" 
+                                     type="text" 
+                                     v-model="question" 
+                                     placeholder="Ask a question..." />
+                            <Button @click="handleAsk" 
+                                    label="Ask" 
+                                    class="flex-none" />
                         </div>
                     </div>
-                
                 </div>
-                
             </TabPanel>
-        </Tabview>
+        </TabView>
     </div>
 </template>
 <script setup>
 import { ref, onMounted, watch } from 'vue'
 import QuestionAnswerCard from './QuestionAnswerCard.vue'
 import { CommunicationEnum } from '../composables/utils.js'
+import ScrollPanel from 'primevue/scrollpanel'
 // testing save
 const qanda = ref(null)
 const qanda_status = ref(null)
@@ -135,6 +146,35 @@ const handleAsk = () => {
 }
 
 </script>
-<style lang="">
-    
+<style scoped>
+.qa-container {
+    position: relative;
+    height: calc(100vh - 150px);
+    display: flex;
+    flex-direction: column;
+}
+
+.qa-list {
+    flex: 1;
+    overflow-y: auto;
+    padding-bottom: 70px; /* Make space for input container */
+}
+
+.input-container {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background-color: white;
+    border-top: 1px solid #ddd;
+    padding: 8px;
+}
+
+:deep(.p-scrollpanel) {
+    height: 100%;
+}
+
+:deep(.p-scrollpanel-content) {
+    padding-bottom: 1rem;
+}
 </style>
