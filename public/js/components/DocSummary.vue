@@ -21,30 +21,30 @@
                 </div>
             </TabPanel>
             <TabPanel header="Ask iCognition">
-                <div class="flex flex-column relative" style="height: 400px">
+                <div class="flex flex-column relative surface-ground" style="height: 500px">
                     <div class="flex-grow-1 overflow-hidden">
-                        <ScrollPanel class="h-full">
-                            <div v-if="qanda_status == 'ready'" class="p-2">
-                                <div v-for="item in qanda" :key="item.id">
+                        <ScrollPanel ref="scrollPanel" class="h-full">
+                            <div v-if="qanda_status == 'ready'" class="p-3">
+                                <div v-for="item in qanda" :key="item.id" class="mb-4">
                                     <QuestionAnswerCard :qanda="item" :uuid="item.uuid" @remove="handleQandARemove"/>
                                 </div>
                             </div>
                         </ScrollPanel>
                     </div>
                     
-                    <div class="flex-none border-top-1 surface-border bg-white p-2">
-                        <div v-if="processing_question" class="p-2">
-                            <div>Loading...</div>
+                    <div class="flex-none surface-card p-3 shadow-2">
+                        <div v-if="processing_question">
+                            <ProgressBar mode="indeterminate" class="h-1rem" />
                         </div>
-                        <div v-else ref="ask_question_input" class="flex flex-row align-items-center">
+                        <div v-else ref="ask_question_input" class="flex gap-2">
                             <InputText @keyup.enter="handleAsk" 
-                                     class="flex-grow-1 p-2 mr-2" 
+                                     class="flex-grow-1" 
                                      type="text" 
                                      v-model="question" 
-                                     placeholder="Ask a question..." />
+                                     placeholder="Ask about this document..." />
                             <Button @click="handleAsk" 
-                                    label="Ask" 
-                                    class="flex-none" />
+                                    icon="pi pi-send"
+                                    class="p-button-rounded" />
                         </div>
                     </div>
                 </div>
@@ -53,7 +53,7 @@
     </div>
 </template>
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, nextTick } from 'vue'
 import QuestionAnswerCard from './QuestionAnswerCard.vue'
 import { CommunicationEnum } from '../composables/utils.js'
 import ScrollPanel from 'primevue/scrollpanel'
@@ -63,6 +63,7 @@ const qanda_status = ref(null)
 const question = ref('')
 const processing_question = ref(false)
 const ask_question_input = ref(null)
+const scrollPanel = ref(null)
 
 // Define the props
 const props = defineProps({
@@ -122,10 +123,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         qanda_status.value = 'ready'
         qanda.value = JSON.parse(request.data)
         console.log('DocSummary -> qanda:', qanda.value)
+        nextTick(() => {
+            scrollToBottom();
+        });
     }
 })
 
-
+const scrollToBottom = () => {
+    console.log('DocSummary -> scrollToBottom:', scrollPanel.value)
+    if (scrollPanel.value) {
+        const panel = scrollPanel.value.$el.querySelector('.p-scrollpanel-content');
+        panel.scrollTop = panel.scrollHeight;
+    }
+}
 
 const handleAsk = () => {
     console.log('DocSummary -> handleAsk:', question.value)
@@ -139,9 +149,10 @@ const handleAsk = () => {
         console.log('DocSummary -> ask-qanda response:', response.answer)
         qanda.value.push(response.answer)
         processing_question.value = false
-        setTimeout(() => {
-            ask_question_input.value.scrollIntoView({ behavior: 'smooth', block: 'end' })
-        }, 200)
+        question.value = ''
+        nextTick(() => {
+            scrollToBottom();
+        });
     })
 }
 

@@ -1,34 +1,39 @@
 <template>
-    <div class="panel">
-        <p class="flex text-xs justify-content-end">{{moment(qanda?.created_at).format('DD MMM YYYY h:mm a')}}</p>
-        <div class="card">
-            <Card class="border-1 border-round border-300 bg-white shadow-3">
-                <template #header>
-                    <div class="header-wrapper border-1 border-round border-300 surface-300 flex border-bottom-1 border-noround-bottom border-top-none border-left-none border-right-none">
-                        <p class="header-text flex-grow-1 text-sm border-round font-semibold">{{qanda?.question}}</p>
-                        <div icon="pi pi-times" 
-                            class="bg-transparent border-transparent border-0 flex-shrink-0 text-black-alpha-90" 
-                            size="small" aria-label="Close" @click="handleQandARemove(uuid)">x</div>
-                    </div>
-                </template>
-                <template #content>
-                    <div v-if="qanda?.status == null" class="content-wrapper">
-                        <div>Loading...</div>
-                    </div>
-                    <div class="content-wrapper bg-white">
-                        <p v-if="is_answer_include_html" class="answer-text" v-html="qanda?.answer"></p>
-                        <p v-else class="answer-text">{{qanda?.answer}}</p>
-                    </div>
-                </template>
-            </Card>
+    <div class="chat-message">
+        <!-- User Question -->
+        <div class="flex align-items-end justify-content-end mb-2">
+            <div class="bg-primary border-round px-3 py-2 shadow-1 max-w-25 relative">
+                <p class="m-0 text-white pb-3">{{qanda?.question}}</p>
+                <small class="timestamp text-50">
+                    {{moment(qanda?.created_at).format('h:mm a')}}
+                </small>
+            </div>
+        </div>
+        
+        <!-- AI Response -->
+        <div class="flex align-items-start">
+            <Avatar image="./icons/icog_action_icon_32x32.png" class="mr-2" />
+            <div class="surface-card border-round px-3 py-2 shadow-1 max-w-25 relative">
+                <div v-if="qanda?.status == null" class="flex align-items-center">
+                    <i class="pi pi-spin pi-spinner mr-2"></i>
+                    <span>Thinking...</span>
+                </div>
+                <div v-else>
+                    <p v-if="is_answer_include_html" class="m-0" v-html="qanda?.answer"></p>
+                    <p v-else class="m-0">{{qanda?.answer}}</p>
+                    <small class="absolute bottom-0 right-0 text-500 p-1">
+                        <i class="pi pi-times cursor-pointer" @click="handleQandARemove(uuid)"></i>
+                    </small>
+                </div>
+            </div>
         </div>
     </div>
 </template>
 
 <script setup lang="js">
     import moment from 'moment';
-    import { computed } from 'vue';
-
+    import { computed, nextTick } from 'vue';
+    import Avatar from 'primevue/avatar';
 
     const props = defineProps({ qanda: { type: Object, required: true }, uuid: { type: String, required: true } });
     
@@ -41,61 +46,77 @@
         }
     })
 
-
-    
     const emit = defineEmits(['remove']);
     const handleQandARemove = (uuid) => {
         //call backend to remove the QandA and only then remove it from the UI
         console.log('Card -> Removing QandA:', uuid);
 
         emit('remove', uuid);
-       
     }
-    
-    
 </script>
+
 <style scoped>
-    /* Create a style for X button for removing a card */
-    div[icon="pi pi-times"] {
-        cursor: pointer;
-        font-weight: bold;
-        padding: 8px;
-        transition: color 0.2s;
-    }
+.chat-message {
+    margin-bottom: 1.5rem;
+}
 
-    div[icon="pi pi-times"]:hover {
-        color: #dc3545;
-    }
+.max-w-25 {
+    max-width: 85%;
+}
 
-    .content-wrapper {
-        padding: 0.5rem;
-        margin: 0;
-    }
+/* Remove previous styles */
+div[icon="pi pi-times"] {
+    cursor: pointer;
+    font-weight: bold;
+    padding: 8px;
+    transition: color 0.2s;
+}
 
-    .answer-text {
-        margin: 0;
-        line-height: 1.4;
-    }
+div[icon="pi pi-times"]:hover {
+    color: #dc3545;
+}
 
-    /* Make sure the Card content has minimal padding */
-    :deep(.p-card-content) {
-        padding: 0 !important;
-    }
+.content-wrapper {
+    padding: 0.5rem;
+    margin: 0;
+}
 
-    .header-wrapper {
-        padding: 0.5rem;
-        margin: 0;
-    }
+.answer-text {
+    margin: 0;
+    line-height: 1.4;
+}
 
-    .header-text {
-        margin: 0;
-        padding: 0;
-        line-height: 1.4;
-    }
+/* Make sure the Card content has minimal padding */
+:deep(.p-card-content) {
+    padding: 0 !important;
+}
 
-    /* Override PrimeVue's default header padding */
-    :deep(.p-card-header) {
-        padding: 0 !important;
-    }
+.header-wrapper {
+    padding: 0.5rem;
+    margin: 0;
+}
 
+.header-text {
+    margin: 0;
+    padding: 0;
+    line-height: 1.4;
+}
+
+/* Override PrimeVue's default header padding */
+:deep(.p-card-header) {
+    padding: 0 !important;
+}
+
+.timestamp {
+    position: absolute;
+    bottom: 2px;
+    right: 8px;
+    font-size: 0.75rem;
+    line-height: 1;
+}
+
+/* Add padding to ensure text doesn't overlap with timestamp */
+.chat-message p {
+    padding-right: 3rem;
+}
 </style>
