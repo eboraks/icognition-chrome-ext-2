@@ -19,8 +19,12 @@
                     <span>Thinking...</span>
                 </div>
                 <div v-else>
-                    <p v-if="is_answer_include_html" class="m-0" v-html="qanda?.answer"></p>
-                    <p v-else class="m-0">{{qanda?.answer}}</p>
+                    <p v-if="is_answer_include_html" class="m-0 cursor-pointer" v-html="qanda?.answer" @click="handleCitationClick"></p>
+                    <p v-else class="m-0 cursor-pointer" @click="handleCitationClick">
+                        {{qanda?.answer}}
+                        <i v-if="showError" class="pi pi-exclamation-circle text-red-500 ml-2" 
+                           title="Citation not found in page"></i>
+                    </p>
                     <small class="absolute bottom-0 right-0 text-500 p-1">
                         <i class="pi pi-times cursor-pointer" @click="handleQandARemove(uuid)"></i>
                     </small>
@@ -32,7 +36,7 @@
 
 <script setup lang="js">
     import moment from 'moment';
-    import { computed, nextTick } from 'vue';
+    import { computed, nextTick, ref } from 'vue';
     import Avatar from 'primevue/avatar';
 
     const props = defineProps({ qanda: { type: Object, required: true }, uuid: { type: String, required: true } });
@@ -53,6 +57,26 @@
 
         emit('remove', uuid);
     }
+
+    const showError = ref(false);
+
+    const handleCitationClick = async () => {
+        if (!props.qanda.citations || props.qanda.citations.length === 0) return;
+        
+        const verbatim = props.qanda.citations[0].verbatims[0].verbatim_text;
+        
+        try {
+            const response = await chrome.runtime.sendMessage({
+                name: 'highlight-citation',
+                verbatim: verbatim
+            });
+            
+            showError.value = !response.success;
+        } catch (error) {
+            console.error('Citation highlighting error:', error);
+            showError.value = true;
+        }
+    };
 </script>
 
 <style scoped>
@@ -118,5 +142,9 @@ div[icon="pi pi-times"]:hover {
 /* Add padding to ensure text doesn't overlap with timestamp */
 .chat-message p {
     padding-right: 3rem;
+}
+
+.cursor-pointer {
+    cursor: pointer;
 }
 </style>

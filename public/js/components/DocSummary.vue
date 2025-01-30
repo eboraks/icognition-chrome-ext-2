@@ -21,9 +21,9 @@
                 </div>
             </TabPanel>
             <TabPanel header="Ask iCognition">
-                <div class="flex flex-column relative surface-ground" style="height: 500px">
+                <div class="flex flex-column relative surface-ground h-full">
                     <div class="flex-grow-1 overflow-hidden">
-                        <ScrollPanel ref="scrollPanel" class="h-full">
+                        <ScrollPanel ref="scrollPanel" class="">
                             <div v-if="qanda_status == 'ready'" class="p-3">
                                 <div v-for="item in qanda" :key="item.id" class="mb-4">
                                     <QuestionAnswerCard :qanda="item" :uuid="item.uuid" @remove="handleQandARemove"/>

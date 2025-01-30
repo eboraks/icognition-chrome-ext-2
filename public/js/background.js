@@ -419,6 +419,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         })
         return true
     }
+    else if (request.name === 'highlight-citation') {
+        chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+            try {
+                console.debug('Background highlighting:', tabs[0].id, request.verbatim);
+                const response = await chrome.tabs.sendMessage(tabs[0].id, {
+                    action: 'highlight',
+                    verbatim: request.verbatim
+                });
+                sendResponse(response);
+            } catch (error) {
+                console.error('Background highlighting error:', error);
+                sendResponse({ success: false, error: error.message });
+            }
+        });
+        return true;
+    }
     else {
         console.log('background.js got message. Unknown request: ', request, " from: ", sender)
     }
@@ -640,4 +656,4 @@ chrome.runtime.onInstalled.addListener(() => {
     });
     
 
-}) 
+})
