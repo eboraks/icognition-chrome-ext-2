@@ -21,18 +21,26 @@
                 </div>
             </TabPanel>
             <TabPanel header="Ask iCognition">
-                <div class="flex flex-column relative surface-ground h-full">
-                    <div class="flex-grow-1 overflow-hidden">
-                        <ScrollPanel ref="scrollPanel" class="">
-                            <div v-if="qanda_status == 'ready'" class="p-3">
-                                <div v-for="item in qanda" :key="item.id" class="mb-4">
+
+                <div v-if="!qanda?.length">
+                    <div class="mb-3" v-for="n in 3" :key="n">
+                        <Skeleton height="100px" class="mb-2 w-full"/>
+                    </div>
+                </div>
+                <div class="chat-container">
+                    <!-- Q&A Cards section - scrollable -->
+                    <div id="q&a_cards" class="qa-content">
+                        <ScrollPanel ref="scrollPanel" class="custom-scrollbar">
+                            <div v-if="qanda?.length">
+                                <div v-for="item in qanda" :key="item.id" class="mb-1">
                                     <QuestionAnswerCard :qanda="item" :uuid="item.uuid" @remove="handleQandARemove"/>
                                 </div>
                             </div>
                         </ScrollPanel>
                     </div>
                     
-                    <div class="flex-none surface-card p-3 shadow-2">
+                    <!-- Ask section - fixed at bottom -->
+                    <div id="ask" class="ask-input">
                         <div v-if="processing_question">
                             <ProgressBar mode="indeterminate" class="h-1rem" />
                         </div>
@@ -57,6 +65,7 @@ import { ref, onMounted, watch, nextTick } from 'vue'
 import QuestionAnswerCard from './QuestionAnswerCard.vue'
 import { CommunicationEnum } from '../composables/utils.js'
 import ScrollPanel from 'primevue/scrollpanel'
+import Skeleton from 'primevue/skeleton'
 // testing save
 const qanda = ref(null)
 const qanda_status = ref(null)
@@ -91,7 +100,7 @@ const tabClick = (event) => {
     if (event.index === 1) {
         //Sleep for 1 second to allow the tab to be rendered
         setTimeout(() => {
-            ask_question_input.value.scrollIntoView({ behavior: 'smooth', block: 'end' })
+            scrollToBottom()
         }, 600)
     }
     
@@ -124,16 +133,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         qanda.value = JSON.parse(request.data)
         console.log('DocSummary -> qanda:', qanda.value)
         nextTick(() => {
-            scrollToBottom();
+            setTimeout(() => {
+                scrollToBottom();
+            }, 100);
         });
     }
 })
 
 const scrollToBottom = () => {
-    console.log('DocSummary -> scrollToBottom:', scrollPanel.value)
     if (scrollPanel.value) {
-        const panel = scrollPanel.value.$el.querySelector('.p-scrollpanel-content');
-        panel.scrollTop = panel.scrollHeight;
+        nextTick(() => {
+            const content = scrollPanel.value.$el.querySelector('.p-scrollpanel-content');
+            const allMessages = content.querySelectorAll('.chat-message');
+            const lastQuestion = allMessages[allMessages.length - 1];
+            
+            if (lastQuestion) {
+                lastQuestion.scrollIntoView({ 
+                    behavior: 'smooth', 
+                    block: 'end',
+                    inline: 'nearest'
+                });
+            }
+        });
     }
 }
 
@@ -151,7 +172,9 @@ const handleAsk = () => {
         processing_question.value = false
         question.value = ''
         nextTick(() => {
-            scrollToBottom();
+            setTimeout(() => {
+                scrollToBottom();
+            }, 100);
         });
     })
 }
@@ -187,5 +210,77 @@ const handleAsk = () => {
 
 :deep(.p-scrollpanel-content) {
     padding-bottom: 1rem;
+}
+
+.chat-container {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 130px);
+    position: relative;
+}
+
+.qa-content {
+    flex: 1;
+    overflow: hidden;
+    padding-right: 0.5rem;
+    margin-bottom: 60px; /* Height of the ask-input */
+}
+
+.ask-input {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background-color: white;
+    padding: 0.5rem;
+    border-top: 1px solid #dee2e6;
+    height: 60px;
+    z-index: 1;
+}
+
+:deep(.p-scrollpanel) {
+    width: 100%;
+    height: 100%;
+}
+
+:deep(.p-scrollpanel-content) {
+    padding: 0.5rem;
+}
+
+:deep(.p-scrollpanel-wrapper) {
+    .p-scrollpanel-bar {
+        background-color: #64748B !important; /* Tailwind's gray-500 or adjust to your preferred shade */
+        opacity: 0.6;
+        
+        &:hover {
+            background-color: #475569 !important; /* Darker on hover (gray-600) */
+            opacity: 0.8;
+        }
+    }
+}
+
+/* Custom scrollbar styles */
+:deep(.custom-scrollbar) {
+    .p-scrollpanel-bar {
+        background-color: #64748B;
+    }
+
+    .p-scrollpanel-bar-y {
+        opacity: 0.6;
+        width: 0.6rem;
+    }
+
+    .p-scrollpanel-bar-x {
+        display: none;
+    }
+}
+
+/* Hide default scrollbar */
+:deep(.p-scrollpanel-content) {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    &::-webkit-scrollbar {
+        display: none;
+    }
 }
 </style>

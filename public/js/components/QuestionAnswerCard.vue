@@ -1,7 +1,7 @@
 <template>
     <div class="chat-message">
         <!-- User Question -->
-        <div class="flex align-items-end justify-content-end mb-2">
+        <div id="question" class="flex align-items-end justify-content-end mb-2">
             <div class="bg-primary border-round px-3 py-2 shadow-1 max-w-25 relative">
                 <p class="m-0 text-white pb-3">{{qanda?.question}}</p>
                 <small class="timestamp text-50">
@@ -81,7 +81,10 @@
 
 <style scoped>
 .chat-message {
+    margin-top: 1.5rem;
     margin-bottom: 1.5rem;
+    margin-left: 0.5rem;
+    margin-right: 1.5rem;
 }
 
 .max-w-25 {

@@ -14,6 +14,7 @@ import Card from 'primevue/card';
 import InputText from 'primevue/inputtext';
 import ScrollPanel from 'primevue/scrollpanel';
 import Avatar from 'primevue/avatar';
+import Message from 'primevue/message';
 
 const app = createApp(App);
 app.use(PrimeVue);
@@ -26,4 +27,5 @@ app.component('Card', Card);
 app.component('InputText', InputText);
 app.component('ScrollPanel', ScrollPanel);
 app.component('Avatar', Avatar);
+app.component('Message', Message);
 app.mount('#app');

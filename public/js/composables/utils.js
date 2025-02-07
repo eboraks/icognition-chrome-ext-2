@@ -27,6 +27,7 @@ export const CommunicationEnum = {
     ASK_QANDA: "ask-qanda",
     DELETE_QANDA: "delete-qanda",
     PROGRESS_PERCENTAGE: "progress_percentage",
+    FETCH_DOCUMENT: "fetch-document",
 };
 
 export function cleanUrl(url) {

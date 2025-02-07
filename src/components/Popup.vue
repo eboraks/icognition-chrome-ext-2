@@ -1,5 +1,5 @@
 <template>
-    <div style="width: 450px; height: 200px">        
+    <div style="width: 450px; height: 600px">        
         <div class="header bg-primary-800 w-full h-20">
             <div class="flex justify-content-between align-items-center">
                 <a :href="library_url" target="_blank">
@@ -15,10 +15,10 @@
             <p>Starting service...</p>
             </div>
             
-
-            <div v-if="server_status == 'down'" class="message_container flex align-items-center justify-content-center">
-                <p class="error">Error connecting to server</p>
+            <div v-if="server_status == 'down'" class="m-2 p-2 flex align-items-center justify-content-center">
+                <Message severity="error" :closable="false">Error connecting to server</Message>
             </div>
+            
 
 
             <div v-if="progressPercent > 0 && progressPercent < 100" class="message_container flex align-items-center justify-content-center">
@@ -54,17 +54,22 @@
         <div v-if = "doc_status == 'ready' && user != null" class="flex align-items-center justify-content-center">
             <DocSummary :doc="doc"></DocSummary>
         </div>
-        
-        
-        
 
-        <div v-if="error_bookmark" class="message_container">
-            <p class="error">{{ error_bookmark }}</p>
+        <div v-if="message_status" class="m-2 p-2 flex align-items-center justify-content-center">
+            <Message severity="info" class="w-full" :closable="false">{{ message_status }}</Message>
         </div>
-
+        
+        
+        <div v-if="error_bookmark && error_bookmark.detail" class="m-2 p-2 flex align-items-center justify-content-center">
+            <Message severity="warn" class="w-full" :closable="false">{{ error_bookmark.detail }}</Message>
+        </div>
+        
         <div v-if="debug_mode" class="debug">
            
-            <p>User: {{ user }}</p>
+            <p>Bookmark Status: {{ bookmark_status }}</p>
+            <p>Error Bookmark: {{ error_bookmark }}</p>
+            <p>Doc Status: {{ doc_status }}</p>
+            <p>Qanda Status: {{ qanda_status }}</p>
             
         </div>
         
@@ -106,10 +111,11 @@ const doc_status = ref(null)
 const doc = ref(null)
 const qanda = ref(null)
 const qanda_status = ref(null)
-const debug_mode = ref(false)
+const debug_mode = ref(true)
 const library_url = ref(import.meta.env.VITE_ICOGNITION_APP_URL)
 const progressPercent = ref(0)
-const user = ref(null) 
+const user = ref(null)
+const message_status = ref(null)
 
 
 
@@ -237,6 +243,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         console.log('Popup -> new document:', request)
         doc_status.value = 'ready'
         doc.value = JSON.parse(request.data)
+        bookmark_status.value = BookmarkStatusEnum.BOOKMARK_EXISTS
     }
 
     if (request.name === CommunicationEnum.NEW_QANDA) {
@@ -329,8 +336,16 @@ const fetchDocument = async (bookmark_id) => {
     chrome.runtime.sendMessage({ name: 'fetch-document', bookmark_id: bookmark_id }).then((response) => {
         console.log('Popup -> fetch-document response:', response)
         if (response.document) {
-            doc.value = response.document
-            doc_status.value = 'ready'
+
+            //Check document status
+            if (response.document.status != 'Done') {
+                doc_status.value = 'error'
+                message_status.value = response.document.llmServiceMeta?.message || 'This page is not an article or is not supported.'
+            } else {
+                doc_status.value = 'ready'
+                doc.value = response.document
+            }
+            
         } else {
             doc_status.value = 'processing'
         }

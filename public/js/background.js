@@ -379,7 +379,7 @@ const fetchDeleteQandA = async (uuid) => {
 
 // Listen from popup to fetch document
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.name === 'fetch-document') {
+    if (request.name === CommunicationEnum.FETCH_DOCUMENT) {
         console.log('background.js got message. Fetch Document for bookmark_id: ', request.bookmark_id)
         fetchDocument(request.bookmark_id).then((doc) => {
             console.log('fetchDocument -> response: ', doc)
