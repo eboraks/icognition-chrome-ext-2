@@ -42,7 +42,6 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 
 
 const registerWebSocketConnection = async () => {
-
     const store = await chrome.storage.session.get(["session_user"])
     if (store.session_user === undefined) {
         console.log('registerWebSocketConnection -> user is null')
@@ -55,82 +54,90 @@ const registerWebSocketConnection = async () => {
         return
     }
 
-
-
     try {
         const ws_url = `${base_url}/ws/${store.session_user.uid}/extension`
         socket.value = new WebSocket(ws_url)
         console.log('WebSocket connection opened:', ws_url)
+        
         socket.value.onopen = () => {
             console.log('WebSocket connection opened:', ws_url)
+        }
+
+        socket.value.onclose = (event) => {
+            console.log('WebSocket connection closed:', event)
+            // Attempt to reconnect after 2 seconds
+            setTimeout(() => {
+                console.log('Attempting to reconnect WebSocket...')
+                registerWebSocketConnection()
+            }, 2000)
+        }
+
+        socket.value.onerror = (error) => {
+            console.error('WebSocket error:', error)
+        }
+
+        // Move message handler here to ensure it's set up with each new connection
+        socket.value.onmessage = (event) => {
+            console.log('WebSocket message received:', event.data)
+            try {
+                const message = JSON.parse(event.data)
+                
+                if (message.type === 'document') {
+                    console.log('WebSocket message document:', message.type, message.document_id)
+                    
+                    //Send message to side panel to render document
+                    chrome.runtime.sendMessage({
+                        name: CommunicationEnum.NEW_DOC,
+                        data: message.data,
+                    }).then((response) => {
+                        console.log('render-document response: ', response)
+                    })
+                }
+
+                if (message.type === 'doc_qanda') {
+                    console.log('WebSocket message doc_qanda:', message.type, message.data)
+                    
+                    //Send message to side panel to render document
+                    chrome.runtime.sendMessage({
+                        name: CommunicationEnum.NEW_QANDA,
+                        data: message.data,
+                    }).then((response) => {
+                        console.log('questiona and answers response: ', response)
+                    })
+
+                }
+
+                if (message.type === 'document_in_progress') {
+                    console.log('WebSocket message document in progress:', message.type, message.data)
+                    storeBookmarks(message.data)
+                }
+
+                if (message.type === 'document_error') {
+                    console.log('WebSocket message document error:', message.type, message.data)
+                    storeBookmarks(message.data)
+                }
+                if (message.type === CommunicationEnum.PROGRESS_PERCENTAGE) {
+                    console.log('WebSocket message processing_percentage:', message.type, message.data)
+                    chrome.runtime.sendMessage({
+                        name: CommunicationEnum.PROGRESS_PERCENTAGE,
+                        data: message.data,
+                    }).then((response) => {
+                        console.log('processing_percentage response: ', response)
+                    })
+                }
+
+            } catch (error) {
+                console.error('Error parsing WebSocket message:', error)
+            }
         }
     } catch (error) {
         console.info('Store session user:', store.session_user)
         console.error('Error opening WebSocket connection:', error)
-    }
-
-    socket.value.onmessage = (event) => {
-        console.log('WebSocket message received:', event.data)
-        try {
-            const message = JSON.parse(event.data)
-            
-            if (message.type === 'document') {
-                console.log('WebSocket message document:', message.type, message.document_id)
-                
-                //Send message to side panel to render document
-                chrome.runtime.sendMessage({
-                    name: CommunicationEnum.NEW_DOC,
-                    data: message.data,
-                }).then((response) => {
-                    console.log('render-document response: ', response)
-                })
-            }
-
-            if (message.type === 'doc_qanda') {
-                console.log('WebSocket message doc_qanda:', message.type, message.data)
-                
-                //Send message to side panel to render document
-                chrome.runtime.sendMessage({
-                    name: CommunicationEnum.NEW_QANDA,
-                    data: message.data,
-                }).then((response) => {
-                    console.log('questiona and answers response: ', response)
-                })
-
-            }
-
-            if (message.type === 'document_in_progress') {
-                console.log('WebSocket message document in progress:', message.type, message.data)
-                storeBookmarks(message.data)
-            }
-
-            if (message.type === 'document_error') {
-                console.log('WebSocket message document error:', message.type, message.data)
-                storeBookmarks(message.data)
-            }
-            if (message.type === CommunicationEnum.PROGRESS_PERCENTAGE) {
-                console.log('WebSocket message processing_percentage:', message.type, message.data)
-                chrome.runtime.sendMessage({
-                    name: CommunicationEnum.PROGRESS_PERCENTAGE,
-                    data: message.data,
-                }).then((response) => {
-                    console.log('processing_percentage response: ', response)
-                })
-            }
-
-        } catch (error) {
-            console.error('Error parsing WebSocket message:', error)
-        }
-
-        
-    }
-
-    socket.value.onerror = (error) => {
-        console.error('WebSocket error:', error)
-    }
-
-    socket.value.onclose = (event) => {
-        console.log('WebSocket connection closed:', event)
+        // Attempt to reconnect after 2 seconds if connection fails
+        setTimeout(() => {
+            console.log('Attempting to reconnect WebSocket after error...')
+            registerWebSocketConnection()
+        }, 2000)
     }
 }
 
@@ -160,7 +167,7 @@ async function postBookmark(tab){
     if (isWebSocketOpen() === false) {
         console.log('postBookmark -> WebSocket is not open')
         registerWebSocketConnection()
-    }
+    } 
 
     const session_user = await chrome.storage.session.get(["session_user"])
     console.log('postBookmark -> user: ', session_user.session_user)
@@ -420,19 +427,50 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true
     }
     else if (request.name === 'highlight-citation') {
-        chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+        (async () => {  // Wrap in async IIFE
             try {
-                console.debug('Background highlighting:', tabs[0].id, request.verbatim);
-                const response = await chrome.tabs.sendMessage(tabs[0].id, {
+                const { active_tab_id } = await chrome.storage.session.get(['active_tab_id']);
+                if (!active_tab_id) {
+                    console.error('No active tab ID found in storage');
+                    sendResponse({ 
+                        success: false, 
+                        error: 'No active tab ID found' 
+                    });
+                    return;
+                }
+
+                const tab = await chrome.tabs.get(active_tab_id);
+                
+                if (!tab) {
+                    console.error('Tab not found');
+                    sendResponse({
+                        success: false,
+                        error: 'Tab not found'
+                    });
+                    return;
+                }
+
+                // Inject content script if not already injected
+                await chrome.scripting.executeScript({
+                    target: { tabId: active_tab_id },
+                    files: ['/js/content-scripts/highlighter.js']
+                });
+
+                console.debug('Background highlighting:', active_tab_id, request.verbatim);
+                
+                const response = await chrome.tabs.sendMessage(active_tab_id, {
                     action: 'highlight',
                     verbatim: request.verbatim
                 });
                 sendResponse(response);
             } catch (error) {
                 console.error('Background highlighting error:', error);
-                sendResponse({ success: false, error: error.message });
+                sendResponse({ 
+                    success: false, 
+                    error: error.message 
+                });
             }
-        });
+        })();
         return true;
     }
     else {
