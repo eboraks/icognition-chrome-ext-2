@@ -20,14 +20,18 @@ export function caspitalFirstLetter(string) {
 export const CommunicationEnum = {
     NEW_DOC: "new-doc",
     NEW_QANDA: "new-qanda",
+    CHAT_MESSAGE: "chat-message",
     DOC_IN_PROGRESS: "doc-in-progress",
     ADD_BOOKMARK: "add-bookmark",
     ASK_QUESTION: "ask-question",
     FETCH_QANDA: "fetch-qanda",
-    ASK_QANDA: "ask-qanda",
+    ASK_QUESTION: "ask-question",
     DELETE_QANDA: "delete-qanda",
     PROGRESS_PERCENTAGE: "progress_percentage",
     FETCH_DOCUMENT: "fetch-document",
+    FETCH_CHAT: "fetch-chat",
+    CHAT_READY: "chat-ready",
+    CHAT_NOT_READY: "chat-not-ready"
 };
 
 export function cleanUrl(url) {

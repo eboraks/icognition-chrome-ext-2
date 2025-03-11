@@ -1,137 +1,99 @@
 <template>
     <div>
-        <TabView class="h-full" @tab-change="tabClick">
-
-            <TabPanel header="Summary">
-                <div v-if="doc == null && doc.tld == null" class="pr-3 py-3" style="height: calc(100% - 49.6px);">
-                    <Skeleton class='mb-2'></Skeleton>
-                    <Skeleton width="5rem" class='mb-2'></Skeleton>
-                </div>
-
-                <div v-else class="flex-columnw-full border-round border-2 border-blue-100 bg-white p-2">
-                    <div class="overflow-y-auto" style="height: calc(100% - 49.6px);">
-                    <p class="line-height-2" v-if="doc != null && doc.is_about != null">{{ doc.is_about }}</p>
-                    <div v-if="doc != null && doc.tldr != null">
-                        <p class="pl-1">Key Points:</p>
-                        <ul>
-                        <li v-for="item in doc.tldr" :key="item">{{ item }}</li>
-                        </ul>
-                    </div>
-                    </div>
-                </div>
-            </TabPanel>
-            <TabPanel header="Ask iCognition">
-
-                <div v-if="!qanda?.length">
-                    <div class="mb-3" v-for="n in 3" :key="n">
-                        <Skeleton height="100px" class="mb-2 w-full"/>
-                    </div>
-                </div>
-                <div class="chat-container">
-                    <!-- Q&A Cards section - scrollable -->
-                    <div id="q&a_cards" class="qa-content">
-                        <ScrollPanel ref="scrollPanel" class="custom-scrollbar">
-                            <div v-if="qanda?.length">
-                                <div v-for="item in qanda" :key="item.id" class="mb-1">
-                                    <QuestionAnswerCard :qanda="item" :uuid="item.uuid" @remove="handleQandARemove"/>
-                                </div>
-                            </div>
-                        </ScrollPanel>
-                    </div>
-                    
-                    <!-- Ask section - fixed at bottom -->
-                    <div id="ask" class="ask-input">
-                        <div v-if="processing_question">
-                            <ProgressBar mode="indeterminate" class="h-1rem" />
-                        </div>
-                        <div v-else ref="ask_question_input" class="flex gap-2">
-                            <InputText @keyup.enter="handleAsk" 
-                                     class="flex-grow-1" 
-                                     type="text" 
-                                     v-model="question" 
-                                     placeholder="Ask about this document..." />
-                            <Button @click="handleAsk" 
-                                    icon="pi pi-send"
-                                    class="p-button-rounded" />
+        <div class="chat-container">
+            <!-- Q&A Cards section - scrollable -->
+            <div id="q&a_cards" class="qa-content">
+                <ScrollPanel ref="scrollPanel" class="custom-scrollbar">
+                    <div v-if="chatMessages.length">
+                        <div v-for="item in chatMessages" :key="item.id" class="mb-1">
+                            <QuestionAnswerCard :chat="item" :uuid="item.id" @remove="handleQandARemove"/>
                         </div>
                     </div>
+                    <div v-else class="mb-3">
+                        <div class="mb-3" v-for="n in 3" :key="n">
+                            <Skeleton height="100px" class="mb-2 w-full"/>
+                        </div>
+                    </div>
+                </ScrollPanel>
+            </div>
+            
+            <!-- Ask section - fixed at bottom -->
+            <div id="ask" class="ask-input">
+                <div v-if="processing_question">
+                    <ProgressBar mode="indeterminate" class="h-1rem" />
                 </div>
-            </TabPanel>
-        </TabView>
+                <div v-else ref="ask_question_input" class="flex gap-2">
+                    <InputText @keyup.enter="handleAsk" 
+                             class="flex-grow-1" 
+                             type="text" 
+                             v-model="question" 
+                             placeholder="Ask about this document..." />
+                    <Button @click="handleAsk" 
+                            icon="pi pi-send"
+                            class="p-button-rounded" />
+                </div>
+            </div>
+        </div>
     </div>
 </template>
 <script setup>
-import { ref, onMounted, watch, nextTick } from 'vue'
+import { ref, onMounted, watch, nextTick, computed } from 'vue'
 import QuestionAnswerCard from './QuestionAnswerCard.vue'
 import { CommunicationEnum } from '../composables/utils.js'
 import ScrollPanel from 'primevue/scrollpanel'
 import Skeleton from 'primevue/skeleton'
-// testing save
-const qanda = ref(null)
-const qanda_status = ref(null)
+
 const question = ref('')
 const processing_question = ref(false)
 const ask_question_input = ref(null)
 const scrollPanel = ref(null)
 
-// Define the props
+// Define the props - now accepting chat instead of doc
 const props = defineProps({
-  doc: {
-    type: Object,
-    required: true
-    }
+  chat: {
+    type: Array,
+    default: () => []
+  }
 })
 
+// We'll use a computed property to handle the case where chat might be null
+const chatMessages = computed(() => props.chat || [])
 
 onMounted(() => {
-    console.log('DocSummary -> onMounted:', props.doc)
-    qanda_status.value = 'loading'
-    chrome.runtime.sendMessage({ name: CommunicationEnum.FETCH_QANDA, document_id: props.doc.id }).then((response) => {
-        console.log('DocSummary -> fetch-qanda response:', response)
-        qanda.value = response.qanda
-        qanda_status.value = 'ready' 
-    })
+    // Scroll to bottom when component is mounted
+    nextTick(() => {
+        setTimeout(() => {
+            scrollToBottom();
+        }, 100);
+    });
 })
 
-const tabClick = (event) => {
-    console.log('DocSummary -> tabAskClick', event)
+const handleQandARemove = (uuid) => {
+    //call backend to remove the QandA and only then remove it from the UI
+    console.log('DocSummary -> Removing QandA:', uuid);
 
-    //Click on the Ask tab, scroll to the input
-    if (event.index === 1) {
-        //Sleep for 1 second to allow the tab to be rendered
-        setTimeout(() => {
-            scrollToBottom()
-        }, 600)
-    }
-    
+    //Send chrome message to remove the QandA
+    chrome.runtime.sendMessage({ name: CommunicationEnum.DELETE_QANDA, uuid: uuid }, function (response) {
+        console.log('handle QandA Delete Response:', response);
+        if (response.deleted === true) {
+            // We can't modify the props directly, so we'll emit an event to the parent
+            emit('remove-chat-item', uuid);
+            ask_question_input.value.scrollIntoView({ behavior: 'smooth', block: 'end' })    
+        }
+    });
 }
 
-const handleQandARemove = (uuid) => {
-        //call backend to remove the QandA and only then remove it from the UI
-        console.log('DocSummary -> Removing QandA:', uuid);
-
-        //Send chrome message to remove the QandA
-        chrome.runtime.sendMessage({ name: CommunicationEnum.DELETE_QANDA, uuid: uuid }, function (response) {
-            console.log('handle QandA Delete Response:', response);
-            if (response.deleted === true) {
-                qanda.value = qanda.value.filter(item => item.uuid !== uuid)
-                ask_question_input.value.scrollIntoView({ behavior: 'smooth', block: 'end' })    
-            }
-            
-        });
-
-    }
-
+// Add emit for removing chat items
+const emit = defineEmits(['remove-chat-item', 'add-chat-item']);
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-
     console.log('DocSummary -> onMessage:', request.name)
 
-    if (request.name === CommunicationEnum.NEW_QANDA) {
-        console.log('DocSummary -> new qanda:', request)
-        qanda_status.value = 'ready'
-        qanda.value = JSON.parse(request.data)
-        console.log('DocSummary -> qanda:', qanda.value)
+    if (request.name === CommunicationEnum.CHAT_MESSAGE) {
+        console.log('DocSummary -> new chat message:', request)
+        const newChat = JSON.parse(request.data);
+        // Emit an event to add the new chat item
+        emit('add-chat-item', newChat);
         nextTick(() => {
             setTimeout(() => {
                 scrollToBottom();
@@ -159,16 +121,34 @@ const scrollToBottom = () => {
 }
 
 const handleAsk = () => {
+    if (!question.value.trim()) return;
+    
     console.log('DocSummary -> handleAsk:', question.value)
 
+    // Try to get document_id from the first chat message
+    let document_id = null;
+    
+    if (props.chat && props.chat.length > 0) {
+        // First try to get it from document_id 
+        document_id = props.chat[0].chat_id;
+        
+    }
+    
+    if (!document_id) {
+        console.error('No document_id found in chat messages');
+        return;
+    }
+    
     const _payload = {
         question: question.value,
-        document_id: props.doc.id
+        document_id: document_id
     }
+    console.log('DocSummary -> asking question payload:', _payload)
     processing_question.value = true
-    chrome.runtime.sendMessage({ name: CommunicationEnum.ASK_QANDA, payload: _payload }).then((response) => {
-        console.log('DocSummary -> ask-qanda response:', response.answer)
-        qanda.value.push(response.answer)
+    chrome.runtime.sendMessage({ name: CommunicationEnum.ASK_QUESTION, payload: _payload }).then((response) => {
+        console.log('DocSummary -> asking question response:', response.answer)
+        // Emit an event to add the new chat item
+        emit('add-chat-item', response.answer);
         processing_question.value = false
         question.value = ''
         nextTick(() => {
@@ -176,42 +156,13 @@ const handleAsk = () => {
                 scrollToBottom();
             }, 100);
         });
-    })
+    }).catch(error => {
+        console.error('Error asking question:', error);
+        processing_question.value = false;
+    });
 }
-
 </script>
 <style scoped>
-.qa-container {
-    position: relative;
-    height: calc(100vh - 150px);
-    display: flex;
-    flex-direction: column;
-}
-
-.qa-list {
-    flex: 1;
-    overflow-y: auto;
-    padding-bottom: 70px; /* Make space for input container */
-}
-
-.input-container {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background-color: white;
-    border-top: 1px solid #ddd;
-    padding: 8px;
-}
-
-:deep(.p-scrollpanel) {
-    height: 100%;
-}
-
-:deep(.p-scrollpanel-content) {
-    padding-bottom: 1rem;
-}
-
 .chat-container {
     display: flex;
     flex-direction: column;
@@ -243,44 +194,7 @@ const handleAsk = () => {
     height: 100%;
 }
 
-:deep(.p-scrollpanel-content) {
-    padding: 0.5rem;
-}
-
-:deep(.p-scrollpanel-wrapper) {
-    .p-scrollpanel-bar {
-        background-color: #64748B !important; /* Tailwind's gray-500 or adjust to your preferred shade */
-        opacity: 0.6;
-        
-        &:hover {
-            background-color: #475569 !important; /* Darker on hover (gray-600) */
-            opacity: 0.8;
-        }
-    }
-}
-
-/* Custom scrollbar styles */
 :deep(.custom-scrollbar) {
-    .p-scrollpanel-bar {
-        background-color: #64748B;
-    }
-
-    .p-scrollpanel-bar-y {
-        opacity: 0.6;
-        width: 0.6rem;
-    }
-
-    .p-scrollpanel-bar-x {
-        display: none;
-    }
-}
-
-/* Hide default scrollbar */
-:deep(.p-scrollpanel-content) {
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-    &::-webkit-scrollbar {
-        display: none;
-    }
+    height: calc(100vh - 190px);
 }
 </style>

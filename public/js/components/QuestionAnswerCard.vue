@@ -3,9 +3,9 @@
         <!-- User Question -->
         <div id="question" class="flex align-items-end justify-content-end mb-2">
             <div class="bg-primary border-round px-3 py-2 shadow-1 max-w-25 relative">
-                <p class="m-0 text-white pb-3">{{qanda?.question}}</p>
+                <p class="m-0 text-white pb-3">{{chat?.prompt}}</p>
                 <small class="timestamp text-50">
-                    {{moment(qanda?.created_at).format('h:mm a')}}
+                    {{moment(chat?.created_at).format('h:mm a')}}
                 </small>
             </div>
         </div>
@@ -14,14 +14,14 @@
         <div class="flex align-items-start">
             <Avatar image="./icons/icog_action_icon_32x32.png" class="mr-2" />
             <div class="surface-card border-round px-3 py-2 shadow-1 max-w-25 relative">
-                <div v-if="qanda?.status == null" class="flex align-items-center">
+                <div v-if="chat?.response == null" class="flex align-items-center">
                     <i class="pi pi-spin pi-spinner mr-2"></i>
                     <span>Thinking...</span>
                 </div>
                 <div v-else>
-                    <p v-if="is_answer_include_html" class="m-0 cursor-pointer" v-html="qanda?.answer" @click="handleCitationClick"></p>
+                    <p v-if="is_answer_include_html" class="m-0 cursor-pointer" v-html="formattedResponse" @click="handleCitationClick"></p>
                     <p v-else class="m-0 cursor-pointer" @click="handleCitationClick">
-                        {{qanda?.answer}}
+                        {{formattedResponse}}
                         <i v-if="showError" class="pi pi-exclamation-circle text-red-500 ml-2" 
                            title="Citation not found in page"></i>
                     </p>
@@ -39,15 +39,48 @@
     import { computed, nextTick, ref } from 'vue';
     import Avatar from 'primevue/avatar';
 
-    const props = defineProps({ qanda: { type: Object, required: true }, uuid: { type: String, required: true } });
+    const props = defineProps({ chat: { type: Object, required: true }, uuid: { type: String, required: true } });
     
-    //Computed fuction to format the answer, if the string include html tags then it will be rendered as html
-    const is_answer_include_html = computed(() => {
-        if (props.qanda?.answer === undefined) {
-            return false;
-        } else {
-            return props.qanda.answer.includes('<');
+    // Computed function to format the response based on the new format
+    const formattedResponse = computed(() => {
+        if (!props.chat?.response) return '';
+        
+        try {
+            // Try to parse the response as JSON
+            const parsedResponse = JSON.parse(props.chat.response);
+            console.log('QuestionAnswerCard -> parsedResponse:', parsedResponse)
+            
+            // Check if it has the new format with summary_for_chat
+            if (parsedResponse.answer_for_chat) {
+                return parsedResponse.answer_for_chat;
+            }
+            
+            // If it has important_bullet_points, format them as a list
+            if (parsedResponse.important_bullet_points && parsedResponse.important_bullet_points.length > 0) {
+                const bulletPoints = parsedResponse.important_bullet_points
+                    .map(point => `<li>${point}</li>`)
+                    .join('');
+                return `${parsedResponse.answer_for_chat || ''}<ul>${bulletPoints}</ul>`;
+            }
+            
+            // Fallback to the original response if we can't parse it properly
+            return props.chat.response;
+        } catch (e) {
+            // If it's not valid JSON, just return the original response
+            return props.chat.response;
         }
+    });
+    
+    //Computed function to format the answer, if the string include html tags then it will be rendered as html
+    const is_answer_include_html = computed(() => {
+        if (!formattedResponse.value) {
+            return false;
+        }
+        
+        // Check for common HTML tags or entities
+        const htmlRegex = /<\/?(?:div|span|p|a|ul|ol|li|h[1-6]|br|hr|img|b|i|strong|em|table|tr|td|th|thead|tbody)(?:\s+[^>]*)?>/i;
+        
+        return htmlRegex.test(formattedResponse.value); 
     })
 
     const emit = defineEmits(['remove']);
@@ -61,20 +94,56 @@
     const showError = ref(false);
 
     const handleCitationClick = async () => {
-        if (!props.qanda.citations || props.qanda.citations.length === 0) return;
-        
-        const verbatim = props.qanda.citations[0].verbatims[0].verbatim_text;
-        
         try {
-            const response = await chrome.runtime.sendMessage({
-                name: 'highlight-citation',
-                verbatim: verbatim
-            });
+            // Try to parse the response as JSON
+            const parsedResponse = JSON.parse(props.chat.response);
             
-            showError.value = !response.success;
-        } catch (error) {
-            console.error('Citation highlighting error:', error);
-            showError.value = true;
+            // Check if we have citations in the new format
+            if (parsedResponse.citations && parsedResponse.citations.length > 0) {
+                // Get the first citation from the array
+                const verbatim = parsedResponse.citations[0];
+                
+                try {
+                    console.log('Highlighting citation:', verbatim);
+                    const response = await chrome.runtime.sendMessage({
+                        name: 'highlight-citation',
+                        verbatim: verbatim
+                    });
+                    
+                    showError.value = !response.success;
+                    if (!response.success) {
+                        console.error('Citation not found in page:', verbatim);
+                    }
+                } catch (error) {
+                    console.error('Citation highlighting error:', error);
+                    showError.value = true;
+                }
+                return;
+            }
+        } catch (e) {
+            // If we can't parse the response as JSON, fall back to the old format
+            console.log('Failed to parse response as JSON, falling back to old format');
+        }
+        
+        // Fall back to the old format if we couldn't use the new format
+        if (props.chat.citations && props.chat.citations.length > 0) {
+            const verbatim = props.chat.citations[0].verbatims[0].verbatim_text;
+            
+            try {
+                console.log('Highlighting citation (old format):', verbatim);
+                const response = await chrome.runtime.sendMessage({
+                    name: 'highlight-citation',
+                    verbatim: verbatim
+                });
+                
+                showError.value = !response.success;
+                if (!response.success) {
+                    console.error('Citation not found in page (old format):', verbatim);
+                }
+            } catch (error) {
+                console.error('Citation highlighting error (old format):', error);
+                showError.value = true;
+            }
         }
     };
 </script>

@@ -7,14 +7,13 @@
                 </a>
                 <div class="pi pi-sign-out text-white mr-4 flex align-items-center" v-if="user" @click="handleSignOut"></div>
             </div>
-
         </div>
+        
         <div class="flex flex-column">
             <div v-if="status.state === AppStatusEnum.INITIALIZING.state" class="m-2 p-2">
                 <ProgressBar mode="indeterminate"></ProgressBar>
                 <p>{{ statusMessage }}</p>
             </div>
-            
             
             <div v-if="status.state === AppStatusEnum.PROCESSING.state && progressPercent > 0 && progressPercent < 100" class="message_container flex align-items-center justify-content-center p-2 m-2">
                 <div class="w-full px-3">
@@ -30,12 +29,15 @@
             <div v-if="status.state === AppStatusEnum.READY.state" class="flex align-items-center justify-content-center m-2 p-2">
                 <Button @click="handleBookmark" label="Add to Library" icon="pi pi-plus" class="flex"></Button>
             </div>
-
         </div>
 
-
-        <div v-if="status.state === AppStatusEnum.DOCUMENT_READY.state" class="flex align-items-center justify-content-center">
-            <DocSummary :doc="doc"></DocSummary>
+        <!-- Chat interface container -->
+        <div v-if="chat_messages && chat_messages.length > 0" class="chat-interface-container">
+            <DocSummary 
+                :chat="chat_messages" 
+                @remove-chat-item="handleRemoveChatItem" 
+                @add-chat-item="handleAddChatItem">
+            </DocSummary>
         </div>
 
         <div v-if="status.severity === AppStatusEnum.ERROR.severity" class="m-2 p-2 flex align-items-center justify-content-center">
@@ -54,10 +56,7 @@
             <p>User: {{ user?.uid }}</p>
             <p>Progress Percent: {{ progressPercent }}</p>
         </div>
-        
     </div>
-
-        
 </template>
 <script setup>
 import { ref, onMounted, watch } from 'vue'
@@ -114,8 +113,8 @@ const bookmark = ref(null)
 const bookmarks = ref([])
 const active_tab = ref(null)
 const doc = ref(null)
-const qanda = ref(null)
-const debug_mode = ref(true)
+const chat_messages = ref(null)
+const debug_mode = ref(false)
 const library_url = ref(import.meta.env.VITE_ICOGNITION_APP_URL)
 const progressPercent = ref(5)
 const user = ref(null)
@@ -142,8 +141,10 @@ if (status.value.state === 'initializing') {
             chrome.storage.session.get(["session_user"]).then((session) => {
                 if (session.session_user) {
                     status.value = AppStatusEnum.READY
+                    statusMessage.value = AppStatusEnum.READY.message
                 } else {
                     status.value = AppStatusEnum.UNAUTHENTICATED
+                    statusMessage.value = AppStatusEnum.UNAUTHENTICATED.message
                 }
             })
         } else {
@@ -225,11 +226,10 @@ const searchBookmarksByUrl = async (url) => {
                 await handleBookmark()
                 return
             } else {
-                console.log('searchBookmarksByUrl -> found:', found)
                 status.value = AppStatusEnum.READY
                 bookmark.value = found
-
-                fetchDocument(bookmark.value.id)
+                console.log('searchBookmarksByUrl -> found bookmark:', bookmark.value)
+                fetchChat(bookmark.value.document_id)
                 return
             }
 
@@ -247,24 +247,46 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     console.log('12. Popup -> onMessage:', request.name)
     
     if (request.name === CommunicationEnum.NEW_DOC) {
-        
-        doc.value = JSON.parse(request.data)
+        doc.value = request.data
         status.value = AppStatusEnum.DOCUMENT_READY
         console.log('13. Popup -> new document, status:', status.value.state)
     }
 
-    if (request.name === CommunicationEnum.NEW_QANDA) {
-        qanda.value = JSON.parse(request.data)
-        console.log('15. Popup -> qanda:', qanda.value)
+    if (request.name === CommunicationEnum.CHAT_READY) {
+        console.log('15. Popup -> chat_message:', request.data)
+        chat_messages.value = request.data
         status.value = AppStatusEnum.DOCUMENT_READY
-        console.log('16. Popup -> qanda, status:', status.value)
+        console.log('15. Popup -> chat_message:', chat_messages.value)
+        
+    }
+
+    if (request.name === CommunicationEnum.CHAT_NOT_READY) {
+        status.value = AppStatusEnum.ERROR
+        statusMessage.value = '16. Popup -> chat_not_ready: Error fetching chat messages'
+    }
+
+    if (request.name === CommunicationEnum.CHAT_MESSAGE) {
+        const newChatMessage = JSON.parse(request.data);
+        console.log('17. Popup -> new chat message:', newChatMessage)
+        
+        // Add the new chat message to the existing messages
+        if (chat_messages.value) {
+            chat_messages.value.push(newChatMessage);
+        } else {
+            chat_messages.value = [newChatMessage];
+        }
+        
+        // If we have a document, update the status to DOCUMENT_READY
+        if (doc.value) {
+            status.value = AppStatusEnum.DOCUMENT_READY
+        }
     }
 
     if (request.name === CommunicationEnum.PROGRESS_PERCENTAGE) {
         if (status.value !== AppStatusEnum.DOCUMENT_READY && doc.value == null) {
             status.value = AppStatusEnum.PROCESSING
             progressPercent.value = Math.min(99, progressPercent.value + request.data)
-            console.log('Popup -> progress percentage:', progressPercent.value)
+            console.log('18. Popup -> progress percentage:', progressPercent.value)
         }
     }
 })
@@ -308,8 +330,8 @@ const handleBookmark = async () => {
             bookmark.value = response.content
             //If the document is not ready, fetch the document
             //This is to ensure that the document is fetched in case the backend didn't send the document via websocket
-            if (doc.value == null && status.value.state !== AppStatusEnum.DOCUMENT_READY.state) {
-                fetchDocument(bookmark.value.id)
+            if (chat_messages.value == null) {
+                fetchChat(bookmark.value.document_id)
             }
         } else {
             //If the status is not server down, that is the reason for the error
@@ -346,6 +368,25 @@ const fetchDocument = async (bookmark_id) => {
             } else {
                 status.value = AppStatusEnum.DOCUMENT_READY
                 doc.value = response.document
+                
+                // Fetch chat messages for this document using the new endpoint
+                const document_id = doc.value.id;
+                chrome.runtime.sendMessage({ 
+                    name: CommunicationEnum.FETCH_CHAT, 
+                    document_id: document_id 
+                }).then((chatResponse) => {
+                    console.log('Popup -> fetch-chat response:', chatResponse)
+                    if (chatResponse && chatResponse.success && chatResponse.chat) {
+                        chat_messages.value = chatResponse.chat;
+                    } else {
+                        console.error('Failed to fetch chat messages:', chatResponse?.error || 'Unknown error');
+                        // Initialize with empty array if fetch fails
+                        chat_messages.value = [];
+                    }
+                }).catch(error => {
+                    console.error('Error fetching chat messages:', error);
+                    chat_messages.value = [];
+                });
             }
         } else {
             status.value = AppStatusEnum.PROCESSING
@@ -371,6 +412,40 @@ chrome.runtime.onMessage.addListener(
         }
 }); 
 
+// Add these methods to handle the events
+const handleRemoveChatItem = (uuid) => {
+    if (chat_messages.value) {
+        chat_messages.value = chat_messages.value.filter(item => item.id !== uuid);
+    }
+}
 
+const handleAddChatItem = (newItem) => {
+    if (chat_messages.value) {
+        chat_messages.value.push(newItem);
+    } else {
+        chat_messages.value = [newItem];
+    }
+}
 
 </script>
+
+<style scoped>
+.header {
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.chat-interface-container {
+    height: calc(100% - 80px);
+    overflow: hidden;
+}
+
+.debug {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    font-size: 10px;
+    background-color: rgba(255, 255, 255, 0.8);
+    padding: 5px;
+    z-index: 1000;
+}
+</style>

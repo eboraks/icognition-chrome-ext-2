@@ -15,8 +15,9 @@ const Endpoints = {
     user_bookmarks: '/bookmarks/user/{ID}',
     user_bookmark: '/bookmark/user',
     qanda: '/document/{id}/questions_answers',
+    chat: '/document/{id}/chat',
     ask_question: '/ask_question',
-    delete_qanda: '/question_answer/{uuid}',
+    delete_chat_message: '/chat_message/{id}',
 }
 
 // Listen to changes in storage and if session_user changes, refresh the bookmarks cache, or delete the cache if the user logs out
@@ -65,11 +66,11 @@ const registerWebSocketConnection = async () => {
 
         socket.value.onclose = (event) => {
             console.log('WebSocket connection closed:', event)
-            // Attempt to reconnect after 2 seconds
+            // Attempt to reconnect aftter 200ms
             setTimeout(() => {
                 console.log('Attempting to reconnect WebSocket...')
                 registerWebSocketConnection()
-            }, 2000)
+            }, 200)
         }
 
         socket.value.onerror = (error) => {
@@ -94,17 +95,16 @@ const registerWebSocketConnection = async () => {
                     })
                 }
 
-                if (message.type === 'doc_qanda') {
-                    console.log('WebSocket message doc_qanda:', message.type, message.data)
-                    
-                    //Send message to side panel to render document
+                
+
+                if (message.type === CommunicationEnum.CHAT_NOT_READY) {
+                    console.log('WebSocket message chat not ready:', message.type, message.data)
                     chrome.runtime.sendMessage({
-                        name: CommunicationEnum.NEW_QANDA,
+                        name: CommunicationEnum.CHAT_NOT_READY,
                         data: message.data,
                     }).then((response) => {
-                        console.log('questiona and answers response: ', response)
+                        console.log('chat not ready response: ', response)
                     })
-
                 }
 
                 if (message.type === 'document_in_progress') {
@@ -123,6 +123,16 @@ const registerWebSocketConnection = async () => {
                         data: message.data,
                     }).then((response) => {
                         console.log('processing_percentage response: ', response)
+                    })
+                }
+
+                if (message.type === CommunicationEnum.CHAT_READY) {
+                    console.log('WebSocket message document chat:', message.type, message.data)
+                    chrome.runtime.sendMessage({
+                        name: CommunicationEnum.CHAT_READY,
+                        data: message.data,
+                    }).then((response) => {
+                        console.log('document_chat response: ', response)
                     })
                 }
 
@@ -350,6 +360,28 @@ const fetchQandA = async (document_id) => {
     }
 }
 
+const fetchChat = async (document_id) => {
+    let attempts = 3
+    const url = `${base_url}${Endpoints.chat.replace('{id}', document_id)}`
+    const options = { 
+        method: 'GET', 
+        headers: { 
+            'Accept': 'application/json', 
+            'Content-Type': 'application/json',
+        } 
+    }
+    
+    try {
+        console.log(`Fetching chat messages from: ${url}`);
+        const response = await fetch_retry(url, options, attempts)
+        // The response is now an array of chat messages
+        return response
+    } catch (error) {
+        console.log('fetchChat -> error: ', error)
+        return null
+    }
+}
+
 const fetchAskQuestion = async (payload) => {
 
     let attempts = 3
@@ -365,9 +397,9 @@ const fetchAskQuestion = async (payload) => {
     }
 }
 
-const fetchDeleteQandA = async (uuid) => {
+const delteChatMessage = async (message_id) => {
     try {
-        const url = `${base_url}${Endpoints.delete_qanda.replace('{uuid}', uuid)}`
+        const url = `${base_url}${Endpoints.delete_chat_message.replace('{id}', message_id)}`
         const res = await fetch(url, {
             method: 'DELETE',
             headers: {
@@ -402,8 +434,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         })
         return true
     }
-    else if (request.name === CommunicationEnum.ASK_QANDA) {
-        console.log('WebSocket message ask_qanda:', request.payload)
+    else if (request.name === CommunicationEnum.FETCH_CHAT) {
+        console.log('background.js got message. Fetch Chat for document_id: ', request.document_id)
+        fetchChat(request.document_id).then((_chat) => {
+            console.log('fetchChat -> response: ', _chat)
+            // Make sure we're sending a valid response
+            if (_chat) {
+                sendResponse({ chat: _chat, success: true })
+            } else {
+                sendResponse({ chat: [], success: false, error: 'Failed to fetch chat messages' })
+            }
+        }).catch(error => {
+            console.error('Error in fetchChat:', error);
+            sendResponse({ chat: [], success: false, error: error.message })
+        })
+        return true; // Important: return true to indicate we'll call sendResponse asynchronously
+    }
+    else if (request.name === CommunicationEnum.ASK_QUESTION) {
+        console.log('Background message ask_question:', request.payload)
         
         fetchAskQuestion(request.payload).then((response) => {
             console.log('fetchAskQuestion response: ', response)
@@ -415,13 +463,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true
     }
     else if (request.name === CommunicationEnum.DELETE_QANDA) {
-        console.log('WebSocket message delete_qanda:', request.uuid)
+        console.log('Background message delete_qanda:', request.uuid)
         
-        fetchDeleteQandA(request.uuid).then((response) => {
-            console.log('fetchDeleteQandA response: ', response)
+        delteChatMessage(request.uuid).then((response) => {
+            console.log('deleteChat response: ', response)
             sendResponse({ deleted: response })    
         }).catch((error) => {
-            console.log('fetchDeleteQandA error: ', error)
+            console.log('deleteChat error: ', error)
             sendResponse({ deleted: error })    
         })
         return true
