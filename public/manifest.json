@@ -13,14 +13,13 @@
     "default_icon": {
       "128": "icons/icog_action_icon_128x128.png",
       "16": "icons/icog_action_icon_32x32.png"
-    },
-    "default_popup": "index.html"
+    }
   },
   "icons": {
     "128": "icons/icog_action_icon_128x128.png",
     "16": "icons/icog_action_icon_32x32.png"
   },
-  "permissions": ["tabs", "storage", "identity", "scripting", "activeTab"],
+  "permissions": ["tabs", "storage", "identity", "scripting", "activeTab", "sidePanel"],
   "host_permissions": [ "http://*/*", "https://*/*", "<all_urls>" ],
   "oauth2": {
     "client_id": "713863541713-ikdrhqt1nms05su0r6i4j2069r6iuqif.apps.googleusercontent.com", 
@@ -34,5 +33,8 @@
       "matches": ["<all_urls>"],
       "js": ["js/content-scripts/highlighter.js"]
     }
-  ]
+  ],
+  "side_panel": {
+    "default_path": "index.html"
+  }
 }

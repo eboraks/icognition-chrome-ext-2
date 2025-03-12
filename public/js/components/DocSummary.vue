@@ -1,11 +1,12 @@
 <template>
-    <div>
-        <div class="chat-container">
+    <div class="chat-container">
+        <!-- Add the chat-messages class to the container -->
+        <div class="chat-messages">
             <!-- Q&A Cards section - scrollable -->
             <div id="q&a_cards" class="qa-content">
                 <ScrollPanel ref="scrollPanel" class="custom-scrollbar">
                     <div v-if="chatMessages.length">
-                        <div v-for="item in chatMessages" :key="item.id" class="mb-1">
+                        <div v-for="item in chatMessages" :key="item.id" class="chat-message mb-1">
                             <QuestionAnswerCard :chat="item" :uuid="item.id" @remove="handleQandARemove"/>
                         </div>
                     </div>
@@ -16,22 +17,22 @@
                     </div>
                 </ScrollPanel>
             </div>
-            
-            <!-- Ask section - fixed at bottom -->
-            <div id="ask" class="ask-input">
-                <div v-if="processing_question">
-                    <ProgressBar mode="indeterminate" class="h-1rem" />
-                </div>
-                <div v-else ref="ask_question_input" class="flex gap-2">
-                    <InputText @keyup.enter="handleAsk" 
-                             class="flex-grow-1" 
-                             type="text" 
-                             v-model="question" 
-                             placeholder="Ask about this document..." />
-                    <Button @click="handleAsk" 
-                            icon="pi pi-send"
-                            class="p-button-rounded" />
-                </div>
+        </div>
+        
+        <!-- Ask section - fixed at bottom -->
+        <div id="ask" class="ask-input">
+            <div v-if="processing_question">
+                <ProgressBar mode="indeterminate" class="h-1rem" />
+            </div>
+            <div v-else ref="ask_question_input" class="flex gap-2">
+                <InputText @keyup.enter="handleAsk" 
+                         class="flex-grow-1" 
+                         type="text" 
+                         v-model="question" 
+                         placeholder="Ask about this document..." />
+                <Button @click="handleAsk" 
+                        icon="pi pi-send"
+                        class="p-button-rounded" />
             </div>
         </div>
     </div>
@@ -163,11 +164,25 @@ const handleAsk = () => {
 }
 </script>
 <style scoped>
+/* Add these styles to ensure proper chat display */
 .chat-container {
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 130px);
-    position: relative;
+    height: 100%;
+    overflow: hidden;
+}
+
+.chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.5rem;
+}
+
+.chat-message {
+    max-width: 95%;
+    margin-left: auto;
+    margin-right: auto;
+    margin-bottom: 0.75rem;
 }
 
 .qa-content {

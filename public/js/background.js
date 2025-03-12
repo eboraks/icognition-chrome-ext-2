@@ -729,9 +729,13 @@ chrome.runtime.onMessage.addListener(
     });
 
 
+// Add this to ensure the side panel is set as the default
 chrome.runtime.onInstalled.addListener(() => {
-    // Open sidepanel on action button click
-    
+    // Set the side panel as default for all URLs
+    chrome.sidePanel.setOptions({
+        path: 'index.html?sidepanel=true',
+        enabled: true
+    });
     
     // Initialize bookmark local storage
     chrome.storage.local.clear(function() {
@@ -740,6 +744,9 @@ chrome.runtime.onInstalled.addListener(() => {
             console.error(error);
         }
     });
-    
+});
 
-})
+// Handle opening the side panel when the extension icon is clicked
+chrome.action.onClicked.addListener((tab) => {
+    chrome.sidePanel.open({ tabId: tab.id });
+});
