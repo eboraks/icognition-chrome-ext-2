@@ -31,7 +31,8 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["js/content-scripts/highlighter.js"]
+      "js": ["js/content-scripts/highlighter.js"],
+      "run_at": "document_end"
     }
   ],
   "side_panel": {

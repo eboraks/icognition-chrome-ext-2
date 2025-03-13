@@ -95,54 +95,176 @@
 
     const handleCitationClick = async () => {
         try {
-            // Try to parse the response as JSON
-            const parsedResponse = JSON.parse(props.chat.response);
+            // Show loading state
+            showError.value = false;
+            const loadingIndicator = document.createElement('div');
+            loadingIndicator.id = 'citation-loading';
+            loadingIndicator.style.position = 'fixed';
+            loadingIndicator.style.top = '10px';
+            loadingIndicator.style.right = '10px';
+            loadingIndicator.style.padding = '8px 12px';
+            loadingIndicator.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+            loadingIndicator.style.color = 'white';
+            loadingIndicator.style.borderRadius = '4px';
+            loadingIndicator.style.zIndex = '9999';
+            loadingIndicator.textContent = 'Finding citation...';
+            document.body.appendChild(loadingIndicator);
             
-            // Check if we have citations in the new format
-            if (parsedResponse.citations && parsedResponse.citations.length > 0) {
-                // Get the first citation from the array
-                const verbatim = parsedResponse.citations[0];
+            let verbatim = '';
+            let allCitations = [];
+            
+            // Try to parse the response as JSON
+            try {
+                const parsedResponse = JSON.parse(props.chat.response);
+                console.log('Parsed response for citations:', parsedResponse);
                 
-                try {
-                    console.log('Highlighting citation:', verbatim);
-                    const response = await chrome.runtime.sendMessage({
-                        name: 'highlight-citation',
-                        verbatim: verbatim
-                    });
-                    
-                    showError.value = !response.success;
-                    if (!response.success) {
-                        console.error('Citation not found in page:', verbatim);
+                // Check if we have citations in the new format
+                if (parsedResponse.text_used_for_answer && parsedResponse.text_used_for_answer.length > 0) {
+                    // Get all citations from the array
+                    allCitations = parsedResponse.text_used_for_answer;
+                    verbatim = allCitations[0];
+                }
+            } catch (e) {
+                console.log('Failed to parse response as JSON, falling back to old format:', e);
+            }
+            
+            // Fall back to the old format if we couldn't use the new format
+            if (allCitations.length === 0 && props.chat.citations && props.chat.citations.length > 0) {
+                props.chat.citations.forEach(citation => {
+                    if (citation.verbatims && citation.verbatims.length > 0) {
+                        citation.verbatims.forEach(v => {
+                            if (v.verbatim_text) {
+                                allCitations.push(v.verbatim_text);
+                            }
+                        });
                     }
-                } catch (error) {
-                    console.error('Citation highlighting error:', error);
-                    showError.value = true;
+                });
+                
+                if (allCitations.length > 0) {
+                    verbatim = allCitations[0];
+                }
+            }
+            
+            if (!verbatim) {
+                console.error('No citation text found');
+                showError.value = true;
+                
+                // Show error notification
+                const errorNotification = document.createElement('div');
+                errorNotification.style.position = 'fixed';
+                errorNotification.style.top = '10px';
+                errorNotification.style.right = '10px';
+                errorNotification.style.padding = '8px 12px';
+                errorNotification.style.backgroundColor = 'rgba(220, 53, 69, 0.9)';
+                errorNotification.style.color = 'white';
+                errorNotification.style.borderRadius = '4px';
+                errorNotification.style.zIndex = '9999';
+                errorNotification.textContent = 'No citation text found in the response';
+                
+                document.body.appendChild(errorNotification);
+                setTimeout(() => {
+                    document.body.removeChild(errorNotification);
+                }, 3000);
+                
+                if (document.getElementById('citation-loading')) {
+                    document.body.removeChild(loadingIndicator);
                 }
                 return;
             }
-        } catch (e) {
-            // If we can't parse the response as JSON, fall back to the old format
-            console.log('Failed to parse response as JSON, falling back to old format');
-        }
-        
-        // Fall back to the old format if we couldn't use the new format
-        if (props.chat.citations && props.chat.citations.length > 0) {
-            const verbatim = props.chat.citations[0].verbatims[0].verbatim_text;
             
-            try {
-                console.log('Highlighting citation (old format):', verbatim);
-                const response = await chrome.runtime.sendMessage({
-                    name: 'highlight-citation',
-                    verbatim: verbatim
-                });
-                
-                showError.value = !response.success;
-                if (!response.success) {
-                    console.error('Citation not found in page (old format):', verbatim);
+            console.log('Highlighting citation:', verbatim);
+            console.log('All available citations:', allCitations);
+            
+            // Try to highlight the first citation
+            let success = false;
+            let attemptCount = 0;
+            
+            // Try each citation until one works or we run out
+            while (!success && attemptCount < allCitations.length) {
+                try {
+                    const currentVerbatim = allCitations[attemptCount];
+                    console.log(`Attempt ${attemptCount + 1}/${allCitations.length}: Highlighting citation:`, currentVerbatim);
+                    
+                    const response = await chrome.runtime.sendMessage({
+                        name: 'highlight-citation',
+                        verbatim: currentVerbatim
+                    });
+                    
+                    console.log('Highlight response:', response);
+                    
+                    if (response && response.success) {
+                        success = true;
+                        break;
+                    }
+                    
+                    attemptCount++;
+                } catch (error) {
+                    console.error(`Error in highlight attempt ${attemptCount + 1}:`, error);
+                    attemptCount++;
                 }
-            } catch (error) {
-                console.error('Citation highlighting error (old format):', error);
+            }
+            
+            if (!success) {
                 showError.value = true;
+                console.error('Failed to highlight any citations after trying all options');
+                
+                // Create a notification with the citation text
+                const errorNotification = document.createElement('div');
+                errorNotification.style.position = 'fixed';
+                errorNotification.style.top = '10px';
+                errorNotification.style.right = '10px';
+                errorNotification.style.padding = '12px 16px';
+                errorNotification.style.backgroundColor = 'rgba(220, 53, 69, 0.9)';
+                errorNotification.style.color = 'white';
+                errorNotification.style.borderRadius = '4px';
+                errorNotification.style.zIndex = '9999';
+                errorNotification.style.maxWidth = '80%';
+                errorNotification.style.boxShadow = '0 2px 10px rgba(0,0,0,0.2)';
+                
+                // Create a container for the citation text
+                const citationContainer = document.createElement('div');
+                citationContainer.style.marginTop = '8px';
+                citationContainer.style.padding = '8px';
+                citationContainer.style.backgroundColor = 'rgba(255,255,255,0.9)';
+                citationContainer.style.color = '#333';
+                citationContainer.style.borderRadius = '4px';
+                citationContainer.style.maxHeight = '150px';
+                citationContainer.style.overflow = 'auto';
+                citationContainer.style.fontSize = '14px';
+                citationContainer.style.lineHeight = '1.4';
+                citationContainer.textContent = verbatim;
+                
+                errorNotification.innerHTML = '<div>Citation not found in page. You can search for this text:</div>';
+                errorNotification.appendChild(citationContainer);
+                
+                // Add a close button
+                const closeButton = document.createElement('div');
+                closeButton.innerHTML = '&times;';
+                closeButton.style.position = 'absolute';
+                closeButton.style.top = '8px';
+                closeButton.style.right = '8px';
+                closeButton.style.cursor = 'pointer';
+                closeButton.style.fontSize = '16px';
+                closeButton.style.fontWeight = 'bold';
+                closeButton.onclick = () => document.body.removeChild(errorNotification);
+                
+                errorNotification.appendChild(closeButton);
+                document.body.appendChild(errorNotification);
+                
+                // Auto-dismiss after 10 seconds
+                setTimeout(() => {
+                    if (document.body.contains(errorNotification)) {
+                        document.body.removeChild(errorNotification);
+                    }
+                }, 10000);
+            }
+        } catch (error) {
+            console.error('Error in handleCitationClick:', error);
+            showError.value = true;
+        } finally {
+            // Remove loading indicator
+            if (document.getElementById('citation-loading')) {
+                document.body.removeChild(document.getElementById('citation-loading'));
             }
         }
     };

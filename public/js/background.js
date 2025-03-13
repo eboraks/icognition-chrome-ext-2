@@ -480,42 +480,34 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const { active_tab_id } = await chrome.storage.session.get(['active_tab_id']);
                 if (!active_tab_id) {
                     console.error('No active tab ID found in storage');
-                    sendResponse({ 
-                        success: false, 
-                        error: 'No active tab ID found' 
-                    });
-                    return;
-                }
-
-                const tab = await chrome.tabs.get(active_tab_id);
-                
-                if (!tab) {
-                    console.error('Tab not found');
+                    
+                    // If no active tab ID in storage, try to get the current active tab
+                    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+                    if (tabs && tabs.length > 0) {
+                        const currentTabId = tabs[0].id;
+                        console.log('Retrieved current active tab ID:', currentTabId);
+                        
+                        // Store it for future use
+                        await chrome.storage.session.set({ active_tab_id: currentTabId });
+                        
+                        // Continue with this tab ID
+                        await handleHighlighting(currentTabId, request.verbatim, sendResponse);
+                        return;
+                    }
+                    
                     sendResponse({
                         success: false,
-                        error: 'Tab not found'
+                        error: 'No active tab found'
                     });
                     return;
                 }
-
-                // Inject content script if not already injected
-                await chrome.scripting.executeScript({
-                    target: { tabId: active_tab_id },
-                    files: ['/js/content-scripts/highlighter.js']
-                });
-
-                console.debug('Background highlighting:', active_tab_id, request.verbatim);
                 
-                const response = await chrome.tabs.sendMessage(active_tab_id, {
-                    action: 'highlight',
-                    verbatim: request.verbatim
-                });
-                sendResponse(response);
+                await handleHighlighting(active_tab_id, request.verbatim, sendResponse);
             } catch (error) {
-                console.error('Background highlighting error:', error);
-                sendResponse({ 
-                    success: false, 
-                    error: error.message 
+                console.error('Error in highlight-citation handler:', error);
+                sendResponse({
+                    success: false,
+                    error: error.message || 'Unknown error'
                 });
             }
         })();
@@ -655,6 +647,10 @@ const badgeToggle = async (tab) => {
 chrome.tabs.onActivated.addListener(async (tab) => { 
 
     console.log('tabs.onActivated', tab.tabId)
+    
+    // Store the active tab ID in session storage
+    await chrome.storage.session.set({ active_tab_id: tab.tabId });
+    console.log('Stored active tab ID in session storage:', tab.tabId);
 
     chrome.tabs.get(tab.tabId, async (tab) => {
         console.log('tabs.onActivated -> get tab -> url: ', tab.url)
@@ -667,6 +663,10 @@ chrome.tabs.onActivated.addListener(async (tab) => {
 
 chrome.tabs.onUpdated.addListener(function (tabId , info) {
     if (info.status === 'complete') {
+        
+        // Store the active tab ID in session storage
+        chrome.storage.session.set({ active_tab_id: tabId });
+        console.log('Stored active tab ID in session storage (onUpdated):', tabId);
         
         chrome.tabs.get(tabId, async (tab) => {
             console.log('tabs.onUpdated -> get tab -> url: ', tab.url)
@@ -744,9 +744,138 @@ chrome.runtime.onInstalled.addListener(() => {
             console.error(error);
         }
     });
+    
+    // Get the current active tab and store its ID
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs && tabs[0]) {
+            chrome.storage.session.set({ active_tab_id: tabs[0].id });
+            console.log('Initial active tab ID stored:', tabs[0].id);
+        }
+    });
 });
 
 // Handle opening the side panel when the extension icon is clicked
 chrome.action.onClicked.addListener((tab) => {
     chrome.sidePanel.open({ tabId: tab.id });
 });
+
+// Message handler for various actions
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    console.log('Background received message:', message);
+    
+    // Handle highlight-citation message
+    if (message.name === 'highlight-citation') {
+        (async () => {
+            try {
+                const { active_tab_id } = await chrome.storage.session.get(['active_tab_id']);
+                
+                if (!active_tab_id) {
+                    console.error('No active tab ID found in storage');
+                    
+                    // If no active tab ID in storage, try to get the current active tab
+                    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+                    if (tabs && tabs.length > 0) {
+                        const currentTabId = tabs[0].id;
+                        console.log('Retrieved current active tab ID:', currentTabId);
+                        
+                        // Store it for future use
+                        await chrome.storage.session.set({ active_tab_id: currentTabId });
+                        
+                        // Continue with this tab ID
+                        await handleHighlighting(currentTabId, message.verbatim, sendResponse);
+                        return;
+                    }
+                    
+                    sendResponse({
+                        success: false,
+                        error: 'No active tab found'
+                    });
+                    return;
+                }
+                
+                await handleHighlighting(active_tab_id, message.verbatim, sendResponse);
+            } catch (error) {
+                console.error('Error in highlight-citation handler:', error);
+                sendResponse({
+                    success: false,
+                    error: error.message || 'Unknown error'
+                });
+            }
+        })();
+        
+        return true; // Keep the message channel open for the async response
+    }
+    
+    // Handle other messages...
+    // ... existing message handlers ...
+});
+
+// Helper function to handle the highlighting process
+async function handleHighlighting(tabId, verbatim, sendResponse) {
+    try {
+        // First check if the tab exists
+        const tab = await chrome.tabs.get(tabId);
+        if (!tab) {
+            console.error('Tab not found');
+            sendResponse({
+                success: false,
+                error: 'Tab not found'
+            });
+            return;
+        }
+        
+        console.log('Injecting content script into tab:', tabId);
+        
+        // Try to inject the content script
+        try {
+            await chrome.scripting.executeScript({
+                target: { tabId: tabId },
+                files: ['/js/content-scripts/highlighter.js']
+            });
+            console.log('Content script injected successfully');
+        } catch (injectionError) {
+            console.error('Error injecting content script:', injectionError);
+            // Continue anyway, as the script might already be there
+        }
+        
+        // Add a small delay to ensure the script is loaded
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        console.log('Sending highlight request to tab:', tabId, 'with verbatim:', verbatim);
+        
+        // Send the message to the content script with a timeout
+        const messagePromise = new Promise((resolve) => {
+            chrome.tabs.sendMessage(
+                tabId, 
+                { action: 'highlight', verbatim: verbatim },
+                (response) => {
+                    const lastError = chrome.runtime.lastError;
+                    if (lastError) {
+                        console.error('Error sending message to content script:', lastError);
+                        resolve({ success: false, error: lastError.message });
+                    } else {
+                        console.log('Highlight response:', response);
+                        resolve(response || { success: false, error: 'No response from content script' });
+                    }
+                }
+            );
+        });
+        
+        // Add a timeout to handle cases where the content script doesn't respond
+        const timeoutPromise = new Promise((resolve) => {
+            setTimeout(() => {
+                resolve({ success: false, error: 'Content script did not respond in time' });
+            }, 2000);
+        });
+        
+        // Wait for either the message response or the timeout
+        const result = await Promise.race([messagePromise, timeoutPromise]);
+        sendResponse(result);
+    } catch (error) {
+        console.error('Error in handleHighlighting:', error);
+        sendResponse({
+            success: false,
+            error: error.message || 'Unknown error in highlighting process'
+        });
+    }
+}
