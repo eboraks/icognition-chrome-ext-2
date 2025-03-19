@@ -31,7 +31,9 @@ export const CommunicationEnum = {
     FETCH_DOCUMENT: "fetch-document",
     FETCH_CHAT: "fetch-chat",
     CHAT_READY: "chat-ready",
-    CHAT_NOT_READY: "chat-not-ready"
+    CHAT_NOT_READY: "chat-not-ready",
+    ERROR: "error",
+    SUGGESTED_QUESTIONS: 'suggested-questions',
 };
 
 export function cleanUrl(url) {

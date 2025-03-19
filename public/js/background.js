@@ -40,42 +40,82 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
     }
 });
 
-
+// Add these variables to track connection state
+let isConnecting = false;
+let reconnectAttempts = 0;
+let maxReconnectAttempts = 10;
+let reconnectTimeout = null;
+let heartbeatInterval = null;
 
 const registerWebSocketConnection = async () => {
-    const store = await chrome.storage.session.get(["session_user"])
-    if (store.session_user === undefined) {
-        console.log('registerWebSocketConnection -> user is null')
-        return
+    // Prevent multiple simultaneous connection attempts
+    if (isConnecting) {
+        console.log('Already attempting to connect, skipping');
+        return;
+    }
+    
+    isConnecting = true;
+    
+    const store = await chrome.storage.session.get(["session_user"]);
+    if (!store.session_user) {
+        console.log('registerWebSocketConnection -> user is null');
+        isConnecting = false;
+        return;
     }
 
-    // Check if socket is open
+    // Check if socket is open and valid
     if (socket.value && socket.value.readyState === WebSocket.OPEN) {
-        console.log('WebSocket is already open')
-        return
+        console.log('WebSocket is already open');
+        isConnecting = false;
+        return;
     }
 
+    // Clean up any existing connection
+    cleanupWebSocket();
+    
     try {
-        const ws_url = `${base_url}/ws/${store.session_user.uid}/extension`
-        socket.value = new WebSocket(ws_url)
-        console.log('WebSocket connection opened:', ws_url)
+        const ws_url = `${base_url}/ws/${store.session_user.uid}/extension`;
+        socket.value = new WebSocket(ws_url);
+        console.log('WebSocket connection initiated:', ws_url);
         
         socket.value.onopen = () => {
-            console.log('WebSocket connection opened:', ws_url)
-        }
+            console.log('WebSocket connection opened successfully');
+            isConnecting = false;
+            reconnectAttempts = 0;
+            
+            // Set up heartbeat to keep connection alive
+            heartbeatInterval = setInterval(() => {
+                if (socket.value && socket.value.readyState === WebSocket.OPEN) {
+                    socket.value.send(JSON.stringify({ type: 'ping' }));
+                } else {
+                    clearInterval(heartbeatInterval);
+                }
+            }, 30000); // Send heartbeat every 30 seconds
+        };
 
         socket.value.onclose = (event) => {
-            console.log('WebSocket connection closed:', event)
-            // Attempt to reconnect aftter 200ms
-            setTimeout(() => {
-                console.log('Attempting to reconnect WebSocket...')
-                registerWebSocketConnection()
-            }, 200)
-        }
+            console.log('WebSocket connection closed:', event);
+            cleanupWebSocket();
+            
+            // Implement exponential backoff for reconnection
+            if (reconnectAttempts < maxReconnectAttempts) {
+                const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+                console.log(`Scheduling reconnect attempt ${reconnectAttempts + 1} in ${delay}ms`);
+                
+                reconnectTimeout = setTimeout(() => {
+                    reconnectAttempts++;
+                    console.log(`Attempting to reconnect WebSocket (attempt ${reconnectAttempts})`);
+                    registerWebSocketConnection();
+                }, delay);
+            } else {
+                console.log('Maximum reconnection attempts reached, giving up');
+            }
+        };
 
         socket.value.onerror = (error) => {
-            console.error('WebSocket error:', error)
-        }
+            console.error('WebSocket error:', error);
+            // Let onclose handle reconnection
+        };
 
         // Move message handler here to ensure it's set up with each new connection
         socket.value.onmessage = (event) => {
@@ -97,13 +137,15 @@ const registerWebSocketConnection = async () => {
 
                 
 
-                if (message.type === CommunicationEnum.CHAT_NOT_READY) {
-                    console.log('WebSocket message chat not ready:', message.type, message.data)
+                if (message.type === CommunicationEnum.ERROR) {
+                    console.log('WebSocket message error:', message.type, message.data)
                     chrome.runtime.sendMessage({
-                        name: CommunicationEnum.CHAT_NOT_READY,
+                        name: CommunicationEnum.ERROR,
                         data: message.data,
                     }).then((response) => {
-                        console.log('chat not ready response: ', response)
+                        console.log('error response: ', response)
+                    }).catch(error => {
+                        console.error('Error sending ERROR message:', error)
                     })
                 }
 
@@ -128,11 +170,33 @@ const registerWebSocketConnection = async () => {
 
                 if (message.type === CommunicationEnum.CHAT_READY) {
                     console.log('WebSocket message document chat:', message.type, message.data)
+                    
+                    // Ensure the data is properly formatted as an array
+                    let chatData = message.data;
+                    if (!Array.isArray(chatData)) {
+                        console.log('Converting chat data to array:', chatData);
+                        chatData = [chatData];
+                    }
+                    
                     chrome.runtime.sendMessage({
                         name: CommunicationEnum.CHAT_READY,
-                        data: message.data,
+                        data: chatData,
                     }).then((response) => {
                         console.log('document_chat response: ', response)
+                    }).catch(error => {
+                        console.error('Error sending CHAT_READY message:', error);
+                    });
+                }
+
+                if (message.type === CommunicationEnum.SUGGESTED_QUESTIONS) {
+                    console.log('WebSocket message suggested questions:', message.type, message.data)
+                    chrome.runtime.sendMessage({
+                        name: CommunicationEnum.SUGGESTED_QUESTIONS,
+                        data: message.data,
+                    }).then((response) => {
+                        console.log('suggested-questions response: ', response)
+                    }).catch(error => {
+                        console.error('Error sending suggested questions:', error)
                     })
                 }
 
@@ -143,12 +207,50 @@ const registerWebSocketConnection = async () => {
     } catch (error) {
         console.info('Store session user:', store.session_user)
         console.error('Error opening WebSocket connection:', error)
-        // Attempt to reconnect after 2 seconds if connection fails
-        setTimeout(() => {
-            console.log('Attempting to reconnect WebSocket after error...')
-            registerWebSocketConnection()
-        }, 2000)
+        // Schedule reconnection with backoff
+        if (reconnectAttempts < maxReconnectAttempts) {
+            const delay = Math.min(2000 * Math.pow(2, reconnectAttempts), 30000);
+            reconnectTimeout = setTimeout(() => {
+                reconnectAttempts++;
+                registerWebSocketConnection();
+            }, delay);
+        }
     }
+}
+
+// Add a cleanup function
+const cleanupWebSocket = () => {
+    // Clear any pending reconnect
+    if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = null;
+    }
+    
+    // Clear heartbeat interval
+    if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+    }
+    
+    // Close existing socket if it exists
+    if (socket.value) {
+        // Remove all event listeners to prevent memory leaks
+        socket.value.onopen = null;
+        socket.value.onclose = null;
+        socket.value.onerror = null;
+        socket.value.onmessage = null;
+        
+        // Only try to close if not already closed
+        if (socket.value.readyState !== WebSocket.CLOSED) {
+            try {
+                socket.value.close();
+            } catch (e) {
+                console.error('Error closing WebSocket:', e);
+            }
+        }
+    }
+    
+    isConnecting = false;
 }
 
 //Check if socket is open
@@ -292,21 +394,28 @@ const searchServerBookmarksByUrl = async (user_id, url) => {
                 html: "",
                 user_id: user_id
             }),
-        })
-        console.log('searchServerBookmarkByUrl -> response: ', response)
-        if (response.status == 404) {
-            const bm_error = await response.json()
-            console.log('searchServerBookmarkByUrl -> error: ', bm_error)
-            return { bookmark: undefined, error: bm_error }
+        });
+        console.log('searchServerBookmarkByUrl -> response: ', response);
+        
+        if (response.status === 404) {
+            const error = await response.json();
+            console.log('searchServerBookmarkByUrl -> error: ', error);
+            return { bookmark: undefined, error: error };
         }
-        if (response.status == 200) {
-            const _bookmark = await response.json()
-            console.log('searchServerBookmarkByUrl -> success: ', bookmark)
-            return { bookmark: _bookmark, error: null }
+        
+        if (response.status === 200) {
+            const bookmark = await response.json();
+            console.log('searchServerBookmarkByUrl -> success: ', bookmark);
+            return { bookmark: bookmark, error: null };
         }
+        
+        // Handle any other status codes
+        const error = await response.json();
+        return { bookmark: undefined, error: error };
     }
     catch (err) {
-        return { bookmark, error: err }
+        console.error('searchServerBookmarkByUrl -> error: ', err);
+        return { bookmark: undefined, error: err };
     }
 }
 
@@ -330,35 +439,8 @@ function refreshBookmarksCache(user_uid) {
     })
 }
 
-const fetchDocument = async (bookmark_id) => {
-    let attempts = 30
-    const url = `${base_url}${Endpoints.document_plus.replace('{ID}', bookmark_id)}`
-    const options = { method: 'GET', headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', } }
-    
-    try {
-        const document = await fetch_retry(url, options, attempts)
-        return document
-    } catch (error){
-        console.log('fetchDocument -> error: ', error)
-        return null
-    }
 
-}
 
-const fetchQandA = async (document_id) => {
-
-    let attempts = 3
-    const url = `${base_url}${Endpoints.qanda.replace('{id}', document_id)}`
-    const options = { method: 'GET', headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', } }
-
-    try {
-        const qanda = await fetch_retry(url, options, attempts)
-        return qanda
-    } catch (error) {
-        console.log('fetchQandA -> error: ', error)
-        return null
-    }
-}
 
 const fetchChat = async (document_id) => {
     let attempts = 3
@@ -418,23 +500,9 @@ const delteChatMessage = async (message_id) => {
 
 // Listen from popup to fetch document
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.name === CommunicationEnum.FETCH_DOCUMENT) {
-        console.log('background.js got message. Fetch Document for bookmark_id: ', request.bookmark_id)
-        fetchDocument(request.bookmark_id).then((doc) => {
-            console.log('fetchDocument -> response: ', doc)
-            sendResponse({ document: doc })
-        })
-        return true
-    }
-    else if (request.name === CommunicationEnum.FETCH_QANDA) {
-        console.log('background.js got message. Fetch QandA for document_id: ', request.document_id)
-        fetchQandA(request.document_id).then((_qanda) => {
-            console.log('fetchQandA -> response: ', _qanda)
-            sendResponse({ qanda: _qanda })
-        })
-        return true
-    }
-    else if (request.name === CommunicationEnum.FETCH_CHAT) {
+    
+    
+    if (request.name === CommunicationEnum.FETCH_CHAT) {
         console.log('background.js got message. Fetch Chat for document_id: ', request.document_id)
         fetchChat(request.document_id).then((_chat) => {
             console.log('fetchChat -> response: ', _chat)
@@ -879,3 +947,22 @@ async function handleHighlighting(tabId, verbatim, sendResponse) {
         });
     }
 }
+
+// Add this to your background.js to periodically check connection
+setInterval(() => {
+    if (!isWebSocketOpen() && user.value) {
+        console.log('WebSocket connection check failed, attempting to reconnect');
+        registerWebSocketConnection();
+    }
+}, 60000); // Check every minute
+
+// Add this to handle extension lifecycle
+chrome.runtime.onSuspend.addListener(() => {
+    console.log('Extension is being suspended, cleaning up WebSocket');
+    cleanupWebSocket();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+    console.log('Extension starting up, initializing WebSocket');
+    registerWebSocketConnection();
+});

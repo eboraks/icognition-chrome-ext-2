@@ -5,9 +5,9 @@
             <!-- Q&A Cards section - scrollable -->
             <div id="q&a_cards" class="qa-content">
                 <ScrollPanel ref="scrollPanel" class="custom-scrollbar">
-                    <div v-if="chatMessages.length">
-                        <div v-for="item in chatMessages" :key="item.id" class="chat-message mb-1">
-                            <QuestionAnswerCard :chat="item" :uuid="item.id" @remove="handleQandARemove"/>
+                    <div v-if="chatMessages.length > 0">
+                        <div v-for="item in chatMessages" :key="item.id || index" class="chat-message mb-1">
+                            <QuestionAnswerCard :chat="item" :uuid="item.id || index" @remove="handleQandARemove"/>
                         </div>
                     </div>
                     <div v-else class="mb-3">
@@ -58,9 +58,17 @@ const props = defineProps({
 })
 
 // We'll use a computed property to handle the case where chat might be null
-const chatMessages = computed(() => props.chat || [])
+const chatMessages = computed(() => {
+    // Ensure we always return an array, even if props.chat is null or undefined
+    const result = Array.isArray(props.chat) ? props.chat : [];
+    console.log('DocSummary -> chatMessages computed property called, result:', result);
+    return result;
+})
+
+console.log('DocSummary -> chatMessages:', chatMessages.value)
 
 onMounted(() => {
+    console.log('DocSummary -> component mounted, chatMessages:', chatMessages.value);
     // Scroll to bottom when component is mounted
     nextTick(() => {
         setTimeout(() => {
@@ -90,6 +98,10 @@ const emit = defineEmits(['remove-chat-item', 'add-chat-item']);
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     console.log('DocSummary -> onMessage:', request.name)
 
+    if (request.name === CommunicationEnum.CHAT_READY) {
+        console.log('DocSummary -> CHAT_READY message received:', request.data);
+    }
+
     if (request.name === CommunicationEnum.CHAT_MESSAGE) {
         console.log('DocSummary -> new chat message:', request)
         const newChat = JSON.parse(request.data);
@@ -108,14 +120,16 @@ const scrollToBottom = () => {
         nextTick(() => {
             const content = scrollPanel.value.$el.querySelector('.p-scrollpanel-content');
             const allMessages = content.querySelectorAll('.chat-message');
-            const lastQuestion = allMessages[allMessages.length - 1];
             
-            if (lastQuestion) {
-                lastQuestion.scrollIntoView({ 
-                    behavior: 'smooth', 
-                    block: 'end',
-                    inline: 'nearest'
-                });
+            if (allMessages.length > 0) {
+                const lastQuestion = allMessages[allMessages.length - 1];
+                if (lastQuestion) {
+                    lastQuestion.scrollIntoView({ 
+                        behavior: 'smooth', 
+                        block: 'end',
+                        inline: 'nearest'
+                    });
+                }
             }
         });
     }

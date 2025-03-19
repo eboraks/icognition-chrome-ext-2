@@ -13,6 +13,7 @@ import InputText from 'primevue/inputtext';
 import ScrollPanel from 'primevue/scrollpanel';
 import Avatar from 'primevue/avatar';
 import Message from 'primevue/message';
+import AutoComplete from 'primevue/autocomplete';
 
 console.log('main.js loaded');
 
@@ -26,7 +27,7 @@ app.component('InputText', InputText);
 app.component('ScrollPanel', ScrollPanel);
 app.component('Avatar', Avatar);
 app.component('Message', Message);
-
+app.component('AutoComplete', AutoComplete);
 // Set up tab change listeners
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
     console.log('Tab activated event fired with tabId:', activeInfo.tabId);

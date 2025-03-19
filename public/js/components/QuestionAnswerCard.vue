@@ -3,7 +3,7 @@
         <!-- User Question -->
         <div id="question" class="flex align-items-end justify-content-end mb-2">
             <div class="bg-primary border-round px-3 py-2 shadow-1 max-w-25 relative">
-                <p class="m-0 text-white pb-3">{{chat?.prompt}}</p>
+                <p class="m-0 text-white pb-3">{{chat?.user_prompt}}</p>
                 <small class="timestamp text-50">
                     {{moment(chat?.created_at).format('h:mm a')}}
                 </small>

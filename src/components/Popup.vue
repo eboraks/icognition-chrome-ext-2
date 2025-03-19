@@ -47,6 +47,38 @@
             </DocSummary>
         </div>
 
+        <!-- Ask input section - always visible -->
+        <div id="ask" class="ask-input" v-if="status.state === AppStatusEnum.READY.state || status.state === AppStatusEnum.DOCUMENT_READY.state">               
+            <div ref="ask_question_input" class="flex gap-2">
+                <div class="autocomplete-container flex-grow-1">
+                    <AutoComplete 
+                        v-model="selectedQuestion"
+                        :suggestions="filteredQuestions"
+                        @complete="searchQuestions"
+                        @keyup.enter="handleAsk"
+                        class="w-full"
+                        placeholder="Ask about this document..."
+                        :dropdown="true"
+                        :panelStyle="{ width: '100%' }"
+                        :pt="{
+                            root: { class: 'w-full' },
+                            panel: { class: 'surface-ground border-1 border-round-md shadow-2' },
+                            input: { class: 'text-sm w-full' }
+                        }"
+                    >
+                        <template #option="slotProps">
+                            <div class="suggestion-item">
+                                {{ slotProps.option }}
+                            </div>
+                        </template>
+                    </AutoComplete>
+                </div>
+                <Button @click="handleAsk" 
+                        icon="pi pi-send"
+                        class="p-button-rounded" />
+            </div>
+        </div>
+
         <div v-if="status.severity === AppStatusEnum.ERROR.severity" class="m-2 p-2 flex align-items-center justify-content-center">
             <Message id="status-message" 
                     :severity="status.severity" 
@@ -56,17 +88,17 @@
             </Message>
         </div>
         
-        <div v-if="debug_mode" class="debug">
-            <p>Status: {{ status.state }}</p>
-            <p>Status Message: {{ statusMessage }}</p>
-            <p>Document: {{ doc?.id }}</p>
-            <p>User: {{ user?.uid }}</p>
-            <p>Progress Percent: {{ progressPercent }}</p>
+        <div v-if="debug_mode" class="debug surface-ground p-2 border-top-1 border-primary-100">
+            <p class="text-sm text-600 mb-1">Status: {{ status.state }}</p>
+            <p class="text-sm text-600 mb-1">Status Message: {{ statusMessage }}</p>
+            <p class="text-sm text-600 mb-1">Document: {{ doc?.id }}</p>
+            <p class="text-sm text-600 mb-1">User: {{ user?.uid }}</p>
+            <p class="text-sm text-600">Progress Percent: {{ progressPercent }}</p>
         </div>
     </div>
 </template>
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, nextTick } from 'vue'
 import { cleanUrl, CommunicationEnum } from '../../public/js/composables/utils.js';
 import Button from 'primevue/button';
 import DocSummary from '../../public/js/components/DocSummary.vue';
@@ -74,6 +106,7 @@ import GoogleLoginButton from '../../public/js/components/GoogleLoginButton.vue'
 import ProgressBar from 'primevue/progressbar';
 import Message from 'primevue/message';
 import useAuth from '../../public/js/composables/useAuth.js';
+import AutoComplete from 'primevue/autocomplete';
 
 const { handleSignOut } = useAuth()
 
@@ -122,10 +155,13 @@ const bookmarks = ref([])
 const active_tab = ref(null)
 const doc = ref(null)
 const chat_messages = ref(null)
-const debug_mode = ref(false)
+const debug_mode = ref(true) // TODO: Remove this before production
 const library_url = ref(import.meta.env.VITE_ICOGNITION_APP_URL || 'https://app.icognition.ai')
 const progressPercent = ref(5)
 const user = ref(null)
+const suggestedQuestions = ref(['What is the name of the company, this is a long question, very long question that I am asking?', 'What is the name of the product?', 'What is the name of the service?', 'What is the name of the person?', 'What is the name of the place?'])
+const selectedQuestion = ref('')
+const filteredQuestions = ref([])
 
 // Store chats by URL
 const chatsByUrl = ref({});
@@ -231,11 +267,13 @@ const handleTabChange = (tab) => {
     const currentUrl = cleanUrl(tab.url);
     console.log('New active tab URL (cleaned):', currentUrl);
     
-    // Reset current chat and status
+    // Reset all states
     chat_messages.value = null;
     bookmark.value = null;
     doc.value = null;
     progressPercent.value = 5;
+    status.value = AppStatusEnum.READY; // Reset to READY state
+    statusMessage.value = null; // Clear any error messages
     console.log('Reset chat, bookmark, and doc');
     
     // Check if we have a saved chat for this URL
@@ -247,9 +285,6 @@ const handleTabChange = (tab) => {
         if (documentIdsByUrl.value[currentUrl]) {
             status.value = AppStatusEnum.DOCUMENT_READY;
             console.log('Setting status to DOCUMENT_READY');
-        } else {
-            status.value = AppStatusEnum.READY;
-            console.log('Setting status to READY (saved chat but no document ID)');
         }
     } else if (user.value) {
         // If no saved chat but user is logged in, check for bookmarks
@@ -264,10 +299,7 @@ const handleTabChange = (tab) => {
     }
     
     console.log('Final status after tab change:', status.value.state);
-    console.log('Should show Analyze button:', 
-        status.value.state === AppStatusEnum.READY.state && 
-        (!chat_messages.value || chat_messages.value.length === 0));
-};
+}
 
 watch(user, (after, before) => {
     if (after) {
@@ -345,9 +377,7 @@ const searchBookmarksByUrl = async (url) => {
 
         } catch (error) {
             console.error('Error searching bookmarks by URL:', error);
-            status.value = AppStatusEnum.ERROR;
-            statusMessage.value = 'Error searching bookmarks';
-            console.log('Error searching bookmarks, setting status to ERROR');
+            handleError('Error searching bookmarks');
             return;
         }
     } else {
@@ -372,23 +402,38 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.name === CommunicationEnum.CHAT_READY) {
-        console.log('Chat message:', request.data)
-        chat_messages.value = request.data
+        console.log('Chat ready -> request:', request)
+        // Make sure we're setting chat_messages to an array
+        if (Array.isArray(request.data)) {
+            chat_messages.value = request.data;
+            progressPercent.value = 100;
+        } else {
+            // If it's not an array, create an array with the single item
+            chat_messages.value = [request.data];
+            console.log('Chat ready -> converted non-array to array:', chat_messages.value);
+        }
+        
         status.value = AppStatusEnum.DOCUMENT_READY
-        console.log('Chat message:', chat_messages.value)
+        console.log('Chat ready -> chat_messages.value:', chat_messages.value)
         
         // Save chat for current URL
         if (active_tab.value && active_tab.value.url) {
             chatsByUrl.value[cleanUrl(active_tab.value.url)] = [...chat_messages.value];
         }
+        
+        // Force a refresh of the DocSummary component
+        nextTick(() => {
+            console.log('Chat ready -> nextTick, chat_messages:', chat_messages.value);
+        });
     }
 
-    if (request.name === CommunicationEnum.CHAT_NOT_READY) {
-        status.value = AppStatusEnum.ERROR
-        statusMessage.value = 'Chat not ready: Error fetching chat messages'
+    if (request.name === CommunicationEnum.ERROR) {
+        console.log('Error -> request:', request)
+        handleError('Error fetching chat messages: ' + request.data);
     }
 
     if (request.name === CommunicationEnum.CHAT_MESSAGE) {
+        console.log('Chat message -> request:', request)
         const newChatMessage = JSON.parse(request.data);
         console.log('New chat message:', newChatMessage)
         
@@ -411,7 +456,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.name === CommunicationEnum.PROGRESS_PERCENTAGE) {
-        if (status.value !== AppStatusEnum.DOCUMENT_READY && doc.value == null) {
+        if (status.value !== AppStatusEnum.DOCUMENT_READY && doc.value == null && progressPercent.value < 99) {
             status.value = AppStatusEnum.PROCESSING
             progressPercent.value = Math.min(99, progressPercent.value + request.data)
             console.log('Progress percentage:', progressPercent.value)
@@ -420,10 +465,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     
     if (request.name === 'error-bookmarking') {
         console.log('error-bookmarking -> request', request)
-        status.value = AppStatusEnum.ERROR
-        doc.value = null
-        statusMessage.value = request.data
-        sendResponse({ message: 'bookmark-page recived' })
+        doc.value = null;
+        handleError(request.data);
+        sendResponse({ message: 'bookmark-page received' })
     }
 
     if (request.name === 'question-answers-ready') {
@@ -431,6 +475,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         doc.value = request.data
         status.value = AppStatusEnum.READY
         sendResponse({ message: 'document-ready recived' })
+    }
+
+    if (request.name === CommunicationEnum.SUGGESTED_QUESTIONS) {
+        console.log('Suggested questions received:', request.data);
+        suggestedQuestions.value = request.data;
+        // Initialize filtered questions with all suggestions
+        filteredQuestions.value = [...request.data];
     }
 })
 
@@ -494,9 +545,8 @@ const handleBookmark = async () => {
         } else {
             //If the status is not server down, that is the reason for the error
             if (status.value.state !== AppStatusEnum.SERVER_DOWN.state) {
-                status.value = AppStatusEnum.ERROR
-                statusMessage.value = response.content.detail || 'Error creating bookmark'
-                status.value.message = response.content.detail || 'Error creating bookmark'
+                const errorMessage = response.content.detail || 'Error creating a chat';
+                handleError(errorMessage);
             }
         }
     })
@@ -520,16 +570,11 @@ const fetchChat = async (document_id) => {
             }
         } else {
             console.error('Failed to fetch chat messages:', chatResponse?.error || 'Unknown error');
-            // Initialize with empty array if fetch fails
-            chat_messages.value = [];
-            status.value = AppStatusEnum.ERROR;
-            statusMessage.value = 'Failed to fetch chat messages';
+            handleError('Failed to fetch chat messages');
         }
     }).catch(error => {
         console.error('Error fetching chat messages:', error);
-        chat_messages.value = [];
-        status.value = AppStatusEnum.ERROR;
-        statusMessage.value = 'Error fetching chat messages';
+        handleError('Error fetching chat messages');
     });
 }
 
@@ -583,6 +628,78 @@ const clearCurrentChat = () => {
         status.value = AppStatusEnum.READY;
     }
 }
+
+function handleError(errorMessage) {
+  // Set error status and messages
+  status.value = {
+    ...AppStatusEnum.ERROR,
+    message: errorMessage  // Set the message in the status object
+  };
+  statusMessage.value = errorMessage;  // Also set the statusMessage for consistency
+  
+  // Clear chat messages to reset UI
+  chat_messages.value = null;
+  
+  // Clear from URL cache if needed
+  if (active_tab.value && active_tab.value.url) {
+    const currentUrl = cleanUrl(active_tab.value.url);
+    delete chatsByUrl.value[currentUrl];
+  }
+  
+  console.error('Error:', errorMessage);
+}
+
+const searchQuestions = (event) => {
+    setTimeout(() => {
+        if (!event.query.trim().length) {
+            filteredQuestions.value = [...suggestedQuestions.value];
+        }
+        else {
+            filteredQuestions.value = suggestedQuestions.value.filter((item) => {
+                return item.toLowerCase().includes(event.query.toLowerCase());
+            });
+        }
+        console.log('Filtered questions:', filteredQuestions.value);
+    }, 250);
+};
+
+const handleAsk = () => {
+    if (!selectedQuestion.value) return;
+    
+    console.log('handleAsk -> question:', selectedQuestion.value);
+    
+    // Try to get document_id from the first chat message
+    let document_id = null;
+    if (chat_messages.value && chat_messages.value.length > 0) {
+        document_id = chat_messages.value[0].chat_id;
+    }
+    
+    if (!document_id) {
+        console.error('No document_id found in chat messages');
+        return;
+    }
+    
+    const payload = {
+        question: selectedQuestion.value,
+        document_id: document_id
+    };
+    
+    console.log('handleAsk -> payload:', payload);
+    
+    chrome.runtime.sendMessage({ 
+        name: CommunicationEnum.ASK_QUESTION, 
+        payload: payload 
+    }).then((response) => {
+        console.log('handleAsk -> response:', response);
+        if (response && response.answer) {
+            handleAddChatItem(response.answer);
+        }
+        selectedQuestion.value = ''; // Clear the input after asking
+    }).catch(error => {
+        console.error('Error asking question:', error);
+        handleError('Error asking question');
+    });
+};
 </script>
 
 <style scoped>
@@ -617,13 +734,41 @@ const clearCurrentChat = () => {
 }
 
 .debug {
-    position: absolute;
+    position: fixed;
+    bottom: 60px;
+    left: 0;
+    right: 0;
+    background-color: var(--surface-ground);
+    border-top: 1px solid var(--surface-border);
+    z-index: 1000;
+    max-height: 80px;
+    overflow-y: auto;
+    font-family: var(--font-family);
+}
+
+.debug p {
+    margin: 0.25rem 0;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    color: var(--text-color-secondary);
+}
+
+/* Update ask-input z-index to ensure proper layering */
+.ask-input {
+    position: fixed;
     bottom: 0;
     left: 0;
-    font-size: 10px;
-    background-color: rgba(255, 255, 255, 0.8);
-    padding: 5px;
-    z-index: 1000;
+    right: 0;
+    background-color: var(--surface-card);
+    padding: 0.5rem;
+    border-top: 1px solid var(--surface-border);
+    height: 60px;
+    z-index: 1001;
+}
+
+/* Adjust scrollbar height to account for debug panel */
+:deep(.custom-scrollbar) {
+    height: calc(100vh - 250px);
 }
 
 .mb-2 {
@@ -674,5 +819,59 @@ const clearCurrentChat = () => {
 
 :deep(.p-inputtext) {
     font-size: 0.9rem !important;
+}
+
+:deep(.p-autocomplete) {
+    width: 100%;
+    display: block;
+}
+
+:deep(.p-autocomplete-panel) {
+    position: absolute;
+    max-height: 300px !important;
+    overflow-y: auto;
+    width: 100% !important;
+    left: 0 !important;
+    right: 0 !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+}
+
+:deep(.p-autocomplete-items) {
+    padding: 0 !important;
+    width: 100% !important;
+}
+
+:deep(.p-autocomplete-item) {
+    width: 100% !important;
+    box-sizing: border-box !important;
+    padding: 0.5rem 0.75rem !important;
+    line-height: 1.2 !important;
+    white-space: pre-wrap !important;
+    word-break: break-word !important;
+}
+
+.autocomplete-container {
+    position: relative;
+    width: 100%;
+}
+
+.suggestion-item {
+    padding: 0.5rem 0.75rem;
+    line-height: 1.2;
+    font-size: 0.875rem;
+    color: var(--text-color);
+    white-space: normal;
+    word-wrap: break-word;
+    border-bottom: 1px solid var(--surface-border);
+}
+
+.suggestion-item:last-child {
+    border-bottom: none;
+}
+
+.suggestion-item:hover {
+    background-color: var(--surface-hover);
+    cursor: pointer;
 }
 </style>
