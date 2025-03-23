@@ -19,9 +19,19 @@
                     <span>Thinking...</span>
                 </div>
                 <div v-else>
-                    <p v-if="is_answer_include_html" class="m-0 cursor-pointer" v-html="formattedResponse" @click="handleCitationClick"></p>
-                    <p v-else class="m-0 cursor-pointer" @click="handleCitationClick">
-                        {{formattedResponse}}
+                    <!-- Add typing effect for HTML content with dynamic cursor class -->
+                    <p v-if="is_answer_include_html" 
+                       class="m-0 cursor-pointer typing-effect" 
+                       :class="{ 'is-typing': isTyping }"
+                       v-html="displayedText" 
+                       @click="handleCitationClick"></p>
+                    
+                    <!-- Add typing effect for plain text with dynamic cursor class -->
+                    <p v-else 
+                       class="m-0 cursor-pointer typing-effect"
+                       :class="{ 'is-typing': isTyping }"
+                       @click="handleCitationClick">
+                        {{displayedText}}
                         <i v-if="showError" class="pi pi-exclamation-circle text-red-500 ml-2" 
                            title="Citation not found in page"></i>
                     </p>
@@ -36,10 +46,39 @@
 
 <script setup lang="js">
     import moment from 'moment';
-    import { computed, nextTick, ref } from 'vue';
+    import { computed, nextTick, ref, onMounted, watch } from 'vue';
     import Avatar from 'primevue/avatar';
 
-    const props = defineProps({ chat: { type: Object, required: true }, uuid: { type: String, required: true } });
+    const props = defineProps({ 
+        chat: { type: Object, required: true }, 
+        uuid: { type: String, required: true },
+        // Add typing speed props with default values
+        typingSpeedPreset: { type: String, default: 'medium' }, // 'slow', 'medium', 'fast', 'instant'
+        customTypingSpeed: { type: Number, default: null } // Allow custom milliseconds per character
+    });
+    
+    // Ref for the typing effect
+    const displayedText = ref('');
+    const isTyping = ref(false);
+    
+    // Calculate typing speed based on preset or custom value
+    const typingSpeed = computed(() => {
+        // If custom speed is provided, use it
+        if (props.customTypingSpeed !== null && props.customTypingSpeed >= 0) {
+            return props.customTypingSpeed;
+        }
+        
+        // Otherwise use presets
+        switch (props.typingSpeedPreset) {
+            case 'slow': return 80; // Slower typing - 80ms per character
+            case 'fast': return 15; // Faster typing - 15ms per character
+            case 'instant': return 1; // Almost instant - 1ms per character
+            case 'medium':
+            default: return 30; // Default medium speed - 30ms per character
+        }
+    });
+    
+    const typingTimeout = ref(null);
     
     // Computed function to format the response based on the new format
     const formattedResponse = computed(() => {
@@ -81,9 +120,144 @@
         const htmlRegex = /<\/?(?:div|span|p|a|ul|ol|li|h[1-6]|br|hr|img|b|i|strong|em|table|tr|td|th|thead|tbody)(?:\s+[^>]*)?>/i;
         
         return htmlRegex.test(formattedResponse.value); 
-    })
+    });
+    
+    // Function to implement typing effect
+    const typeText = (text, index = 0) => {
+        isTyping.value = true;
+        
+        // Emit an event to trigger scroll in parent components
+        emit('typing', true);
+        
+        // Skip typing animation if preset is "instant"
+        if (props.typingSpeedPreset === 'instant') {
+            displayedText.value = text;
+            isTyping.value = false;
+            emit('typing', false);
+            emit('typing-progress', { progress: 1, isComplete: true });
+            return;
+        }
+        
+        // For HTML content, we need to handle tags differently
+        if (is_answer_include_html.value) {
+            // If HTML, we don't want to split tags, so we'll use a simpler approach
+            // that shows the whole response gradually
+            const fullLength = text.length;
+            
+            // Adjust chunk size based on typing speed for smoother animation
+            const chunkSize = typingSpeed.value < 20 ? 10 : 5; // Larger chunks for fast speeds
+            const charsToShow = Math.min(index + chunkSize, fullLength);
+            
+            displayedText.value = text.substring(0, charsToShow);
+            
+            // Trigger scroll to follow typing
+            emit('typing-progress', {
+                progress: charsToShow / fullLength,
+                isComplete: charsToShow >= fullLength
+            });
+            
+            if (charsToShow < fullLength) {
+                // Continue typing
+                typingTimeout.value = setTimeout(() => {
+                    typeText(text, charsToShow);
+                }, typingSpeed.value / 3); // HTML is shown in chunks, so use faster timing
+            } else {
+                // Done typing
+                isTyping.value = false;
+                emit('typing', false);
+                emit('typing-progress', { progress: 1, isComplete: true });
+                
+                // Ensure a final scroll update happens after typing is complete
+                setTimeout(() => {
+                    emit('typing-progress', { progress: 1, isComplete: true, final: true });
+                }, 100);
+            }
+        } else {
+            // For plain text, we can show character by character
+            if (index < text.length) {
+                displayedText.value = text.substring(0, index + 1);
+                
+                // Trigger scroll to follow typing
+                emit('typing-progress', {
+                    progress: index / text.length,
+                    isComplete: index >= text.length - 1
+                });
+                
+                typingTimeout.value = setTimeout(() => {
+                    typeText(text, index + 1);
+                }, typingSpeed.value);
+            } else {
+                isTyping.value = false;
+                emit('typing', false);
+                emit('typing-progress', { progress: 1, isComplete: true });
+                
+                // Ensure a final scroll update happens after typing is complete
+                setTimeout(() => {
+                    emit('typing-progress', { progress: 1, isComplete: true, final: true });
+                }, 100);
+            }
+        }
+    };
+    
+    // Function to stop typing and display full text immediately
+    const completeTyping = () => {
+        if (isTyping.value && typingTimeout.value) {
+            clearTimeout(typingTimeout.value);
+            displayedText.value = formattedResponse.value;
+            isTyping.value = false;
+            emit('typing', false);
+            emit('typing-progress', { progress: 1, isComplete: true });
+            
+            // Ensure a final scroll update happens after typing is complete
+            setTimeout(() => {
+                emit('typing-progress', { progress: 1, isComplete: true, final: true });
+            }, 100);
+        }
+    };
+    
+    // Watch for changes in the formatted response
+    watch(() => formattedResponse.value, (newVal, oldVal) => {
+        if (newVal && newVal !== oldVal) {
+            // Clear any existing typing timeouts
+            if (typingTimeout.value) {
+                clearTimeout(typingTimeout.value);
+            }
+            
+            // Reset displayed text and start typing
+            displayedText.value = '';
+            typeText(newVal);
+        }
+    }, { immediate: true });
+    
+    // Watch for changes in typing speed settings
+    watch(() => [props.typingSpeedPreset, props.customTypingSpeed], () => {
+        // If text is currently being typed, reset and restart with new speed
+        if (isTyping.value && formattedResponse.value) {
+            if (typingTimeout.value) {
+                clearTimeout(typingTimeout.value);
+            }
+            
+            // For instant mode, just show the full text
+            if (props.typingSpeedPreset === 'instant') {
+                displayedText.value = formattedResponse.value;
+                isTyping.value = false;
+                return;
+            }
+            
+            // Otherwise restart typing with current progress
+            const currentProgress = displayedText.value.length;
+            typeText(formattedResponse.value, currentProgress);
+        }
+    });
+    
+    // Start typing effect when component is mounted
+    onMounted(() => {
+        if (formattedResponse.value) {
+            typeText(formattedResponse.value);
+        }
+    });
 
-    const emit = defineEmits(['remove']);
+    const emit = defineEmits(['remove', 'typing', 'typing-progress']);
     const handleQandARemove = (uuid) => {
         //call backend to remove the QandA and only then remove it from the UI
         console.log('Card -> Removing QandA:', uuid);
@@ -94,6 +268,9 @@
     const showError = ref(false);
 
     const handleCitationClick = async () => {
+        // If typing is in progress, complete it immediately
+        completeTyping();
+        
         try {
             // Show loading state
             showError.value = false;
@@ -155,65 +332,6 @@
                 errorNotification.style.top = '10px';
                 errorNotification.style.right = '10px';
                 errorNotification.style.padding = '8px 12px';
-                errorNotification.style.backgroundColor = 'rgba(220, 53, 69, 0.9)';
-                errorNotification.style.color = 'white';
-                errorNotification.style.borderRadius = '4px';
-                errorNotification.style.zIndex = '9999';
-                errorNotification.textContent = 'No citation text found in the response';
-                
-                document.body.appendChild(errorNotification);
-                setTimeout(() => {
-                    document.body.removeChild(errorNotification);
-                }, 3000);
-                
-                if (document.getElementById('citation-loading')) {
-                    document.body.removeChild(loadingIndicator);
-                }
-                return;
-            }
-            
-            console.log('Highlighting citation:', verbatim);
-            console.log('All available citations:', allCitations);
-            
-            // Try to highlight the first citation
-            let success = false;
-            let attemptCount = 0;
-            
-            // Try each citation until one works or we run out
-            while (!success && attemptCount < allCitations.length) {
-                try {
-                    const currentVerbatim = allCitations[attemptCount];
-                    console.log(`Attempt ${attemptCount + 1}/${allCitations.length}: Highlighting citation:`, currentVerbatim);
-                    
-                    const response = await chrome.runtime.sendMessage({
-                        name: 'highlight-citation',
-                        verbatim: currentVerbatim
-                    });
-                    
-                    console.log('Highlight response:', response);
-                    
-                    if (response && response.success) {
-                        success = true;
-                        break;
-                    }
-                    
-                    attemptCount++;
-                } catch (error) {
-                    console.error(`Error in highlight attempt ${attemptCount + 1}:`, error);
-                    attemptCount++;
-                }
-            }
-            
-            if (!success) {
-                showError.value = true;
-                console.error('Failed to highlight any citations after trying all options');
-                
-                // Create a notification with the citation text
-                const errorNotification = document.createElement('div');
-                errorNotification.style.position = 'fixed';
-                errorNotification.style.top = '10px';
-                errorNotification.style.right = '10px';
-                errorNotification.style.padding = '12px 16px';
                 errorNotification.style.backgroundColor = 'rgba(220, 53, 69, 0.9)';
                 errorNotification.style.color = 'white';
                 errorNotification.style.borderRadius = '4px';
@@ -340,5 +458,30 @@ div[icon="pi pi-times"]:hover {
 
 .cursor-pointer {
     cursor: pointer;
+}
+
+/* Add typing effect styles */
+.typing-effect {
+    position: relative;
+    min-height: 1.4rem;
+}
+
+/* Add blinking cursor effect - only visible during typing */
+.typing-effect::after {
+    content: '|';
+    display: inline;
+    opacity: 0;
+    animation: none; /* Default is no animation */
+}
+
+/* Only show blinking cursor when actively typing */
+.typing-effect.is-typing::after {
+    animation: blink 1s infinite;
+    opacity: 1;
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 0; }
+    50% { opacity: 1; }
 }
 </style>

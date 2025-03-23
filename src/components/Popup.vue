@@ -50,28 +50,45 @@
         <!-- Ask input section - always visible -->
         <div id="ask" class="ask-input" v-if="status.state === AppStatusEnum.READY.state || status.state === AppStatusEnum.DOCUMENT_READY.state">               
             <div ref="ask_question_input" class="flex gap-2">
-                <div class="autocomplete-container flex-grow-1">
-                    <AutoComplete 
+                <div class="textarea-with-autocomplete flex-grow-1">
+                    <Textarea 
                         v-model="selectedQuestion"
-                        :suggestions="filteredQuestions"
-                        @complete="searchQuestions"
-                        @keyup.enter="handleAsk"
-                        class="w-full"
+                        @keydown="handleKeydownInTextarea"
+                        @input="handleTextareaInput"
+                        @focus="handleTextareaFocus"
+                        @blur="handleTextareaBlur"
+                        ref="questionTextarea"
+                        class="w-full min-height-textarea"
                         placeholder="Ask about this document..."
-                        :dropdown="true"
-                        :panelStyle="{ width: '100%' }"
+                        autoResize
+                        rows="2"
                         :pt="{
                             root: { class: 'w-full' },
-                            panel: { class: 'surface-ground border-1 border-round-md shadow-2' },
-                            input: { class: 'text-sm w-full' }
+                            input: { class: 'text-sm w-full p-inputtext-sm' }
                         }"
+                    />
+                    <!-- Autocomplete dropdown - using a more robust approach -->
+                    <div 
+                        v-show="showAutocomplete && filteredQuestions.length > 0" 
+                        class="autocomplete-dropdown"
+                        @mousedown.prevent
                     >
-                        <template #option="slotProps">
-                            <div class="suggestion-item">
-                                {{ slotProps.option }}
-                            </div>
-                        </template>
-                    </AutoComplete>
+                        <div class="debug-dropdown">
+                            <span>Suggested questions ({{filteredQuestions.length}})</span>
+                        </div>
+                        <ul class="autocomplete-list">
+                            <li 
+                                v-for="(question, index) in filteredQuestions" 
+                                :key="index"
+                                @mousedown.prevent="selectSuggestedQuestion(question)"
+                                class="autocomplete-item"
+                                :class="{ 'autocomplete-item-active': index === activeIndex }"
+                                :data-index="index"
+                            >
+                                {{ question }}
+                            </li>
+                        </ul>
+                    </div>
                 </div>
                 <Button @click="handleAsk" 
                         icon="pi pi-send"
@@ -98,7 +115,7 @@
     </div>
 </template>
 <script setup>
-import { ref, onMounted, watch, nextTick } from 'vue'
+import { ref, onMounted, watch, nextTick, onUnmounted } from 'vue'
 import { cleanUrl, CommunicationEnum } from '../../public/js/composables/utils.js';
 import Button from 'primevue/button';
 import DocSummary from '../../public/js/components/DocSummary.vue';
@@ -106,7 +123,7 @@ import GoogleLoginButton from '../../public/js/components/GoogleLoginButton.vue'
 import ProgressBar from 'primevue/progressbar';
 import Message from 'primevue/message';
 import useAuth from '../../public/js/composables/useAuth.js';
-import AutoComplete from 'primevue/autocomplete';
+import Textarea from 'primevue/textarea';
 
 const { handleSignOut } = useAuth()
 
@@ -170,6 +187,12 @@ const bookmarksByUrl = ref({});
 // Store document IDs by URL
 const documentIdsByUrl = ref({});
 
+// Add these new refs for autocomplete functionality
+const showAutocomplete = ref(false);
+const activeIndex = ref(-1);
+const allowBlurToHide = ref(true);
+const questionTextarea = ref(null);
+
 onMounted(async () => {
     console.log('SidePanel component mounted');
     
@@ -232,6 +255,13 @@ onMounted(async () => {
             }
         }
     });
+
+    // Add event listener for keyboard navigation
+    document.addEventListener('keydown', handleKeyDown);
+});
+
+onUnmounted(() => {
+    document.removeEventListener('keydown', handleKeyDown);
 });
 
 const handleTabChange = (tab) => {
@@ -424,6 +454,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // Force a refresh of the DocSummary component
         nextTick(() => {
             console.log('Chat ready -> nextTick, chat_messages:', chat_messages.value);
+            scrollChatToBottom();
         });
     }
 
@@ -433,25 +464,103 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.name === CommunicationEnum.CHAT_MESSAGE) {
-        console.log('Chat message -> request:', request)
-        const newChatMessage = JSON.parse(request.data);
-        console.log('New chat message:', newChatMessage)
+        console.log('Chat message received -> request:', request);
         
-        // Add the new chat message to the existing messages
-        if (chat_messages.value) {
-            chat_messages.value.push(newChatMessage);
-        } else {
-            chat_messages.value = [newChatMessage];
+        try {
+            let newChatMessage;
+            
+            // Process different message formats
+            if (typeof request.data === 'string') {
+                try {
+                    // Try to parse if it's a JSON string
+                    newChatMessage = JSON.parse(request.data);
+                } catch (e) {
+                    console.error('Error parsing chat message JSON:', e);
+                    return; // Skip if we can't parse
+                }
+            } else if (request.data && typeof request.data === 'object') {
+                // If it's already an object, use it directly
+                newChatMessage = request.data;
+            } else {
+                console.error('Invalid chat message format:', request.data);
+                return; // Skip invalid format
+            }
+            
+            console.log('Processed chat message:', newChatMessage);
+            
+            // Remove any existing temporary messages for this question
+            if (chat_messages.value && chat_messages.value.length > 0) {
+                const tempId = 'temp-question-';
+                chat_messages.value = chat_messages.value.filter(msg => 
+                    !msg.id || (typeof msg.id === 'string' && !msg.id.startsWith(tempId))
+                );
+            }
+            
+            // Add the new chat message to the existing messages
+            if (chat_messages.value) {
+                chat_messages.value.push(newChatMessage);
+            } else {
+                chat_messages.value = [newChatMessage];
+            }
+            
+            // Save updated chat for current URL
+            if (active_tab.value && active_tab.value.url) {
+                chatsByUrl.value[cleanUrl(active_tab.value.url)] = [...chat_messages.value];
+            }
+            
+            // Set status to DOCUMENT_READY if not already
+            status.value = AppStatusEnum.DOCUMENT_READY;
+            
+            // Force update and scroll to the bottom
+            nextTick(() => {
+                console.log('Scrolling to bottom after new message');
+                scrollChatToBottom();
+            });
+        } catch (error) {
+            console.error('Error processing chat message:', error);
         }
-        
-        // Save updated chat for current URL
-        if (active_tab.value && active_tab.value.url) {
-            chatsByUrl.value[cleanUrl(active_tab.value.url)] = [...chat_messages.value];
-        }
-        
-        // If we have a document, update the status to DOCUMENT_READY
-        if (doc.value) {
-            status.value = AppStatusEnum.DOCUMENT_READY
+    }
+
+    // Add a new case to handle direct answers from ASK_QUESTION
+    if (request.name === CommunicationEnum.ASK_ANSWER) {
+        console.log('Ask answer -> request:', request);
+        try {
+            const answer = request.answer;
+            if (answer) {
+                // Create a chat message format from the answer
+                const newChatMessage = {
+                    id: answer.id || ('msg-' + Date.now()),
+                    created_at: answer.created_at || new Date().toISOString(),
+                    user_id: answer.user_id || (user.value?.uid || 'system'),
+                    chat_id: answer.chat_id,
+                    chat_type: answer.chat_type || 'document',
+                    user_prompt: answer.user_prompt,
+                    event_name: answer.event_name || 'manual_message',
+                    response: answer.response
+                };
+                
+                // Add to chat messages
+                if (chat_messages.value) {
+                    chat_messages.value.push(newChatMessage);
+                } else {
+                    chat_messages.value = [newChatMessage];
+                }
+                
+                // Save updated chat for current URL
+                if (active_tab.value && active_tab.value.url) {
+                    chatsByUrl.value[cleanUrl(active_tab.value.url)] = [...chat_messages.value];
+                }
+                
+                // Set status to DOCUMENT_READY if not already
+                status.value = AppStatusEnum.DOCUMENT_READY;
+                
+                // Scroll to the bottom after UI update
+                nextTick(() => {
+                    scrollChatToBottom();
+                });
+            }
+        } catch (error) {
+            console.error('Error processing ask answer:', error);
         }
     }
 
@@ -514,9 +623,11 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 });
 
 const handleBookmark = async () => {
+    
+    progressPercent.value = 5;
     status.value = AppStatusEnum.PROCESSING
     statusMessage.value = AppStatusEnum.PROCESSING.message
-    progressPercent.value = 5;
+    
 
     chrome.runtime.sendMessage({name: 'bookmark-page', tab: active_tab.value}).then((response) => {
         console.log('handleBookmark -> response:', response)
@@ -637,69 +748,476 @@ function handleError(errorMessage) {
   };
   statusMessage.value = errorMessage;  // Also set the statusMessage for consistency
   
-  // Clear chat messages to reset UI
-  chat_messages.value = null;
-  
-  // Clear from URL cache if needed
-  if (active_tab.value && active_tab.value.url) {
-    const currentUrl = cleanUrl(active_tab.value.url);
-    delete chatsByUrl.value[currentUrl];
+  // If we have chat messages, try to add the error to the chat instead of clearing it
+  if (chat_messages.value && chat_messages.value.length > 0) {
+    addErrorMessageToChat(errorMessage);
+  } else {
+    // Clear chat messages to reset UI only if there's no existing chat
+    chat_messages.value = null;
+    
+    // Clear from URL cache if needed
+    if (active_tab.value && active_tab.value.url) {
+      const currentUrl = cleanUrl(active_tab.value.url);
+      delete chatsByUrl.value[currentUrl];
+    }
   }
   
   console.error('Error:', errorMessage);
 }
 
-const searchQuestions = (event) => {
-    setTimeout(() => {
-        if (!event.query.trim().length) {
-            filteredQuestions.value = [...suggestedQuestions.value];
+// New function to add error messages to the chat
+function addErrorMessageToChat(errorMessage) {
+  // Create a new error message that looks like a chat message
+  const errorChatMessage = {
+    id: 'error-' + Date.now(), // Create a unique ID
+    created_at: new Date().toISOString(),
+    user_id: 'system',
+    chat_type: 'error',
+    response: JSON.stringify({
+      answer_for_chat: `<div class="error-message">${errorMessage}</div>`,
+      status: 'Error'
+    })
+  };
+  
+  // If we already have chat messages, add this to the chat
+  if (chat_messages.value && chat_messages.value.length > 0) {
+    chat_messages.value.push(errorChatMessage);
+    
+    // Update saved chat for current URL
+    if (active_tab.value && active_tab.value.url) {
+      chatsByUrl.value[cleanUrl(active_tab.value.url)] = [...chat_messages.value];
+    }
+  } else {
+    // If we don't have chat messages yet, initialize with this error
+    chat_messages.value = [errorChatMessage];
+    status.value = AppStatusEnum.DOCUMENT_READY; // Set status to show chat interface
+    
+    // Save to URL cache
+    if (active_tab.value && active_tab.value.url) {
+      chatsByUrl.value[cleanUrl(active_tab.value.url)] = [...chat_messages.value];
+    }
+  }
+}
+
+// Update handleKeydownInTextarea to be the only handler active when textarea is focused
+const handleKeydownInTextarea = (event) => {
+    // If autocomplete is shown, handle navigation within dropdown
+    if (showAutocomplete.value && filteredQuestions.value.length > 0) {
+        switch (event.key) {
+            case 'ArrowDown':
+                event.preventDefault();
+                // Stop event propagation to prevent global handler from also firing
+                event.stopPropagation();
+                console.log('Textarea ArrowDown pressed, current activeIndex:', activeIndex.value);
+                
+                if (activeIndex.value === -1 || activeIndex.value >= filteredQuestions.value.length - 1) {
+                    // If no item is selected or at the end, go to first item
+                    activeIndex.value = 0;
+                } else {
+                    // Simply increment the index
+                    activeIndex.value += 1;
+                }
+                
+                console.log('Textarea ArrowDown: new activeIndex:', activeIndex.value, 'item:', filteredQuestions.value[activeIndex.value]);
+                
+                // Ensure the active item is visible in the dropdown
+                nextTick(() => {
+                    const activeItem = document.querySelector('.autocomplete-item-active');
+                    if (activeItem) {
+                        activeItem.scrollIntoView({ block: 'nearest' });
+                    }
+                });
+                break;
+                
+            case 'ArrowUp':
+                event.preventDefault();
+                // Stop event propagation to prevent global handler from also firing
+                event.stopPropagation();
+                console.log('Textarea ArrowUp pressed, current activeIndex:', activeIndex.value);
+                
+                if (activeIndex.value <= 0) {
+                    // If no item is selected or at the beginning, go to last item
+                    activeIndex.value = filteredQuestions.value.length - 1;
+                } else {
+                    // Simply decrement the index
+                    activeIndex.value -= 1;
+                }
+                
+                console.log('Textarea ArrowUp: new activeIndex:', activeIndex.value, 'item:', filteredQuestions.value[activeIndex.value]);
+                
+                // Ensure the active item is visible in the dropdown
+                nextTick(() => {
+                    const activeItem = document.querySelector('.autocomplete-item-active');
+                    if (activeItem) {
+                        activeItem.scrollIntoView({ block: 'nearest' });
+                    }
+                });
+                break;
+                
+            case 'Enter':
+                event.preventDefault();
+                event.stopPropagation();
+                if (activeIndex.value !== -1) {
+                    // If an item is selected in the dropdown, select it
+                    selectSuggestedQuestion(filteredQuestions.value[activeIndex.value]);
+                } else {
+                    // If no item is selected but dropdown is open, submit the question
+                    handleAsk();
+                    showAutocomplete.value = false;
+                }
+                break;
+                
+            case 'Escape':
+                event.preventDefault();
+                event.stopPropagation();
+                showAutocomplete.value = false;
+                break;
+                
+            case 'Tab':
+                // Prevent default tab behavior and select current item if one is active
+                if (activeIndex.value !== -1) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    selectSuggestedQuestion(filteredQuestions.value[activeIndex.value]);
+                }
+                break;
         }
-        else {
-            filteredQuestions.value = suggestedQuestions.value.filter((item) => {
-                return item.toLowerCase().includes(event.query.toLowerCase());
-            });
+    } else {
+        // When no dropdown is visible, Enter should submit the question
+        if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            handleAsk();
         }
-        console.log('Filtered questions:', filteredQuestions.value);
-    }, 250);
+    }
 };
 
-const handleAsk = () => {
-    if (!selectedQuestion.value) return;
-    
-    console.log('handleAsk -> question:', selectedQuestion.value);
-    
-    // Try to get document_id from the first chat message
-    let document_id = null;
-    if (chat_messages.value && chat_messages.value.length > 0) {
-        document_id = chat_messages.value[0].chat_id;
-    }
-    
-    if (!document_id) {
-        console.error('No document_id found in chat messages');
+// Update handleKeyDown to only handle keyboard navigation when the textarea is NOT focused
+const handleKeyDown = (event) => {
+    // Only handle dropdown navigation at the document level if:
+    // 1. Suggestions are visible
+    // 2. We have suggestions to show
+    // 3. The textarea is NOT focused (this is important to avoid double-handling)
+    if (!showAutocomplete.value || 
+        filteredQuestions.value.length === 0 || 
+        document.activeElement === questionTextarea.value?.$el?.querySelector('textarea')) {
         return;
     }
     
-    const payload = {
-        question: selectedQuestion.value,
-        document_id: document_id
-    };
+    console.log('Global key handler active - textarea is not focused');
     
-    console.log('handleAsk -> payload:', payload);
+    switch (event.key) {
+        case 'ArrowDown':
+            event.preventDefault();
+            console.log('Document ArrowDown pressed, current activeIndex:', activeIndex.value);
+            
+            if (activeIndex.value === -1 || activeIndex.value >= filteredQuestions.value.length - 1) {
+                // If no item is selected or at the end, go to first item
+                activeIndex.value = 0;
+            } else {
+                // Simply increment the index
+                activeIndex.value += 1;
+            }
+            
+            console.log('Document ArrowDown: new activeIndex:', activeIndex.value, 'item:', filteredQuestions.value[activeIndex.value]);
+            break;
+            
+        case 'ArrowUp':
+            event.preventDefault();
+            console.log('Document ArrowUp pressed, current activeIndex:', activeIndex.value);
+            
+            if (activeIndex.value <= 0) {
+                // If no item is selected or at the beginning, go to last item
+                activeIndex.value = filteredQuestions.value.length - 1;
+            } else {
+                // Simply decrement the index
+                activeIndex.value -= 1;
+            }
+            
+            console.log('Document ArrowUp: new activeIndex:', activeIndex.value, 'item:', filteredQuestions.value[activeIndex.value]);
+            break;
+            
+        case 'Enter':
+            if (activeIndex.value !== -1) {
+                event.preventDefault();
+                selectSuggestedQuestion(filteredQuestions.value[activeIndex.value]);
+            }
+            break;
+            
+        case 'Escape':
+            showAutocomplete.value = false;
+            break;
+    }
+};
+
+// Update handleTextareaInput to ensure ordered suggestions
+const handleTextareaInput = (event) => {
+    const query = selectedQuestion.value;
     
-    chrome.runtime.sendMessage({ 
-        name: CommunicationEnum.ASK_QUESTION, 
-        payload: payload 
-    }).then((response) => {
-        console.log('handleAsk -> response:', response);
-        if (response && response.answer) {
-            handleAddChatItem(response.answer);
+    // Show autocomplete dropdown when text is entered
+    showAutocomplete.value = true;
+    
+    // Filter questions based on input, preserving original order
+    if (!query.trim().length) {
+        // Make a fresh copy of the suggestions array to ensure order is maintained
+        filteredQuestions.value = [...suggestedQuestions.value];
+    } else {
+        // Filter while preserving original order
+        filteredQuestions.value = suggestedQuestions.value.filter((item) => {
+            return item.toLowerCase().includes(query.toLowerCase());
+        });
+    }
+    
+    // Always reset active index when input changes
+    activeIndex.value = -1;
+    
+    console.log('Filtered questions count:', filteredQuestions.value.length);
+    console.log('Filtered questions array:', filteredQuestions.value);
+};
+
+// Update handleTextareaFocus to ensure ordered suggestions
+const handleTextareaFocus = () => {
+    // Show all suggestions when textarea is focused, if we have any
+    if (suggestedQuestions.value.length > 0) {
+        showAutocomplete.value = true;
+        // Make a fresh copy of the suggestions array to ensure order is maintained
+        filteredQuestions.value = [...suggestedQuestions.value];
+        activeIndex.value = -1; // Reset active index when showing suggestions
+        console.log('Textarea focused, showing suggestions:', filteredQuestions.value);
+    }
+};
+
+// Handle textarea blur to hide dropdown with delay
+const handleTextareaBlur = () => {
+    // Only hide if we're allowing blur to affect visibility
+    if (allowBlurToHide.value) {
+        // Use setTimeout to allow click events on dropdown items to complete
+        setTimeout(() => {
+            showAutocomplete.value = false;
+            console.log('Hiding autocomplete dropdown');
+        }, 200);
+    }
+};
+
+// Enhanced selectSuggestedQuestion to work with the dropdown
+const selectSuggestedQuestion = (question) => {
+    selectedQuestion.value = question;
+    showAutocomplete.value = false;
+    console.log('Selected question:', question);
+    
+    // Safely focus the textarea after selecting a suggestion
+    nextTick(() => {
+        if (questionTextarea.value && typeof questionTextarea.value.focus === 'function') {
+            try {
+                questionTextarea.value.focus();
+            } catch (e) {
+                console.error('Error focusing textarea:', e);
+            }
         }
-        selectedQuestion.value = ''; // Clear the input after asking
-    }).catch(error => {
-        console.error('Error asking question:', error);
-        handleError('Error asking question');
     });
 };
+
+// Improved scrollChatToBottom function to prevent scroll jittering
+const scrollChatToBottom = (forceSmooth = true) => {
+    console.log('Attempting to scroll to bottom, forceSmooth:', forceSmooth);
+    
+    // Use setTimeout to ensure DOM is fully updated
+    setTimeout(() => {
+        // Find all potential scrollable containers
+        const chatContainer = document.querySelector('.chat-interface-container');
+        const scrollableElement = document.querySelector('.custom-scrollbar');
+        const docSummary = document.querySelector('.docsummary-container');
+        
+        // Create a common scroll function to apply consistent behavior
+        const scrollElementToBottom = (element, smooth = forceSmooth) => {
+            if (!element) return;
+            
+            try {
+                // Use scrollTo with options for smoother scrolling
+                element.scrollTo({
+                    top: element.scrollHeight,
+                    behavior: smooth ? 'smooth' : 'auto'
+                });
+                
+                // Release scroll control after animation completes
+                if (smooth) {
+                    setTimeout(() => {
+                        // Re-scroll with auto to ensure we reached the bottom and fix any jittering
+                        element.scrollTo({
+                            top: element.scrollHeight,
+                            behavior: 'auto'
+                        });
+                    }, 300);
+                }
+            } catch (error) {
+                console.error('Error scrolling element to bottom:', error);
+                // Fallback to the simple method
+                element.scrollTop = element.scrollHeight;
+            }
+        };
+        
+        // Try scrolling each potential container
+        if (chatContainer) {
+            scrollElementToBottom(chatContainer);
+            console.log('Scrolled chat container to bottom', chatContainer.scrollHeight);
+        }
+        
+        if (scrollableElement) {
+            scrollElementToBottom(scrollableElement);
+            console.log('Scrolled custom-scrollbar to bottom', scrollableElement.scrollHeight);
+        }
+        
+        if (docSummary) {
+            scrollElementToBottom(docSummary);
+            console.log('Scrolled docSummary to bottom', docSummary.scrollHeight);
+        }
+        
+        // As a fallback, try scrolling all elements with class containing 'scroll'
+        document.querySelectorAll('[class*="scroll"]').forEach(el => {
+            scrollElementToBottom(el, false); // Use auto behavior for these to avoid conflicts
+        });
+        
+        // Ensure scroll is properly released for user control
+        setTimeout(() => {
+            // This timeout ensures we don't interfere with user scrolling after the content is loaded
+            if (scrollableElement) {
+                scrollableElement.style.pointerEvents = 'auto';
+            }
+            if (chatContainer) {
+                chatContainer.style.pointerEvents = 'auto';
+            }
+        }, 350);
+    }, 100); // Small delay to ensure DOM update has completed
+};
+
+// Update the handleAsk function to better handle the question being posted and the upcoming response
+const handleAsk = () => {
+    // Don't process empty questions
+    if (!selectedQuestion.value || selectedQuestion.value.trim() === '') {
+        console.log('Empty question, not submitting');
+        return;
+    }
+
+    const questionText = selectedQuestion.value.trim();
+    console.log('Submitting question:', questionText);
+    
+    // First try to get document ID from doc.value
+    let documentId = doc.value?.id;
+    
+    // If not available, try to get it from the first chat message
+    if (!documentId && chat_messages.value && chat_messages.value.length > 0) {
+        documentId = chat_messages.value[0].chat_id;
+        console.log('Using document ID from chat_messages:', documentId);
+    }
+    
+    // Check if we have a document ID to ask against
+    if (!documentId) {
+        console.error('No document ID available for question');
+        // Instead of calling handleError, add an error message to the chat
+        addErrorMessageToChat('No document available to ask questions against');
+        return;
+    }
+    
+    // Add a temporary user question to the chat
+    const tempUserQuestion = {
+        id: 'temp-question-' + Date.now(),
+        created_at: new Date().toISOString(),
+        user_id: user.value?.uid || 'user',
+        chat_id: documentId,
+        chat_type: 'document',
+        user_prompt: questionText,
+        event_name: 'user_question',
+        // Empty response for a question
+        response: JSON.stringify({
+            answer_for_chat: `<div class="user-question">Thinking...</div>`,
+            status: 'Pending'
+        })
+    };
+    
+    // Add the user's question to the chat immediately
+    if (chat_messages.value) {
+        chat_messages.value.push(tempUserQuestion);
+    } else {
+        chat_messages.value = [tempUserQuestion];
+    }
+    
+    // Save updated chat for current URL
+    if (active_tab.value && active_tab.value.url) {
+        chatsByUrl.value[cleanUrl(active_tab.value.url)] = [...chat_messages.value];
+    }
+    
+    // Scroll to bottom to show the new question
+    nextTick(() => {
+        scrollChatToBottom();
+    });
+    
+    // Clear the input after submitting
+    selectedQuestion.value = '';
+    
+    // Hide autocomplete dropdown
+    showAutocomplete.value = false;
+    
+    // Send message to background script to ask the question
+    // IMPORTANT: Maintain the exact payload format that the backend expects
+    chrome.runtime.sendMessage({
+        name: CommunicationEnum.ASK_QUESTION,
+        payload: {
+            document_id: documentId,
+            question: questionText
+        }
+    }).then(response => {
+        console.log('Ask question response:', response);
+        
+        // If response contains an immediate answer, handle it
+        if (response && response.answer) {
+            console.log('Got immediate answer:', response.answer);
+            
+            // The websocket will handle displaying the answer, but we'll add a fallback
+            // Wait a bit to see if websocket delivers the message
+            setTimeout(() => {
+                // Check if any non-temporary messages were added since we sent the question
+                const latestMessages = chat_messages.value.filter(msg => 
+                    !msg.id || (typeof msg.id === 'string' && !msg.id.startsWith('temp-question-'))
+                );
+                
+                // If no new messages, use the direct response
+                if (latestMessages.length === chat_messages.value.length - 1) {
+                    console.log('No websocket message received, using direct response');
+                    // Create a message from the response
+                    const answerMessage = {
+                        id: response.answer.id || ('answer-' + Date.now()),
+                        created_at: response.answer.created_at || new Date().toISOString(),
+                        user_id: response.answer.user_id || 'system',
+                        chat_id: documentId,
+                        chat_type: response.answer.chat_type || 'document',
+                        user_prompt: questionText,
+                        event_name: response.answer.event_name || 'answer',
+                        response: response.answer.response
+                    };
+                    
+                    // Replace the temporary message with the real one
+                    chat_messages.value = chat_messages.value.filter(msg => 
+                        !msg.id || (typeof msg.id === 'string' && !msg.id.startsWith('temp-question-'))
+                    );
+                    chat_messages.value.push(answerMessage);
+                    
+                    // Save updated chat for current URL
+                    if (active_tab.value && active_tab.value.url) {
+                        chatsByUrl.value[cleanUrl(active_tab.value.url)] = [...chat_messages.value];
+                    }
+                    
+                    // Scroll to bottom to show the answer
+                    nextTick(() => {
+                        scrollChatToBottom();
+                    });
+                }
+            }, 2000); // Give the websocket 2 seconds to deliver the message
+        }
+    }).catch(error => {
+        console.error('Error asking question:', error);
+        // Add error to chat instead of showing banner
+        addErrorMessageToChat('Error submitting your question. Please try again.');
+    });
+}
 </script>
 
 <style scoped>
@@ -753,7 +1271,7 @@ const handleAsk = () => {
     color: var(--text-color-secondary);
 }
 
-/* Update ask-input z-index to ensure proper layering */
+/* Update ask-input for textarea */
 .ask-input {
     position: fixed;
     bottom: 0;
@@ -762,11 +1280,66 @@ const handleAsk = () => {
     background-color: var(--surface-card);
     padding: 0.5rem;
     border-top: 1px solid var(--surface-border);
-    height: 60px;
+    min-height: 60px;
     z-index: 1001;
+    width: 100%;
+    box-sizing: border-box;
 }
 
-/* Adjust scrollbar height to account for debug panel */
+/* Style for textarea */
+.textarea-with-autocomplete {
+    position: relative;
+    flex: 1;
+    min-width: 0; /* Prevent flex item from overflowing */
+    box-sizing: border-box;
+}
+
+:deep(.p-inputtextarea) {
+    width: 100% !important;
+    box-sizing: border-box !important;
+    resize: none;
+    max-height: 120px;
+    overflow-y: auto;
+    line-height: 1.4;
+    padding: 0.5rem 0.75rem;
+    min-height: 2.8rem;
+    margin: 0;
+    border-radius: 6px;
+}
+
+/* Style for suggested questions */
+.suggested-questions {
+    max-height: 80px;
+    overflow-y: auto;
+    padding-bottom: 5px;
+}
+
+.suggestion-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.suggestion-pill {
+    background-color: #f0f7ff;
+    border: 1px solid #d0e1fd;
+    color: #1e3a8a;
+    border-radius: 16px;
+    padding: 2px 10px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    display: inline-block;
+    max-width: 200px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.suggestion-pill:hover {
+    background-color: #e0effe;
+}
+
+/* Adjust scrollbar height to account for larger ask input */
 :deep(.custom-scrollbar) {
     height: calc(100vh - 250px);
 }
@@ -873,5 +1446,185 @@ const handleAsk = () => {
 .suggestion-item:hover {
     background-color: var(--surface-hover);
     cursor: pointer;
+}
+
+/* Update dropdown styles for perfect alignment */
+.autocomplete-dropdown {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    width: 100%;
+    background-color: white;
+    border: 2px solid var(--primary-color);
+    border-radius: 6px;
+    box-shadow: 0 -2px 20px rgba(0, 0, 0, 0.25);
+    max-height: 250px;
+    overflow-y: auto;
+    z-index: 9999;
+    box-sizing: border-box;
+    margin-bottom: 3px;
+}
+
+.debug-dropdown {
+    background-color: #e3f2fd;
+    color: #0d47a1;
+    padding: 4px 8px;
+    font-size: 12px;
+    text-align: center;
+    border-bottom: 1px solid #bbdefb;
+}
+
+.autocomplete-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.autocomplete-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--surface-border);
+    white-space: normal;
+    word-break: break-word;
+    line-height: 1.4;
+    font-size: 0.9rem;
+    background-color: white;
+}
+
+.autocomplete-item:last-child {
+    border-bottom: none;
+}
+
+.autocomplete-item:hover,
+.autocomplete-item-active {
+    background-color: var(--surface-hover);
+}
+
+/* Update the ask input container */
+.ask-input {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background-color: var(--surface-card);
+    padding: 0.5rem;
+    border-top: 1px solid var(--surface-border);
+    min-height: 60px;
+    z-index: 1001;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* Update the flex container to ensure proper width calculation */
+.flex.gap-2 {
+    position: relative;
+    display: flex;
+    gap: 0.5rem;
+    width: 100%;
+    box-sizing: border-box;
+    align-items: flex-start;
+}
+
+/* Update textarea container for consistent width */
+.textarea-with-autocomplete {
+    position: relative;
+    flex: 1;
+    min-width: 0; /* Prevent flex item from overflowing */
+    box-sizing: border-box;
+}
+
+/* Update textarea styles for proper sizing */
+:deep(.p-inputtextarea) {
+    width: 100% !important;
+    box-sizing: border-box !important;
+    resize: none;
+    max-height: 120px;
+    overflow-y: auto;
+    line-height: 1.4;
+    padding: 0.5rem 0.75rem;
+    min-height: 2.8rem;
+    margin: 0;
+    border-radius: 6px;
+}
+
+/* Update dropdown styles for perfect alignment */
+.autocomplete-dropdown {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    width: 100%;
+    background-color: white;
+    border: 2px solid var(--primary-color);
+    border-radius: 6px;
+    box-shadow: 0 -2px 20px rgba(0, 0, 0, 0.25);
+    max-height: 250px;
+    overflow-y: auto;
+    z-index: 9999;
+    box-sizing: border-box;
+    margin-bottom: 3px;
+}
+
+/* Ensure the send button doesn't affect textarea width */
+.p-button-rounded {
+    flex-shrink: 0;
+}
+
+/* Remove any conflicting margins or paddings */
+.flex-grow-1 {
+    margin: 0;
+    padding: 0;
+}
+
+/* Ensure proper width inheritance */
+:deep(.p-inputtextarea-resizable) {
+    width: 100% !important;
+}
+
+:deep(.p-inputtextarea-wrapper) {
+    width: 100% !important;
+}
+
+/* User question styling */
+:deep(.user-question) {
+    background-color: #f0f7ff;
+    color: #1e3a8a;
+    padding: 10px 15px;
+    border-radius: 8px;
+    margin: 5px 0;
+    font-style: italic;
+}
+
+/* Error message styling */
+:deep(.error-message) {
+    background-color: #fff5f5;
+    color: #e53e3e;
+    padding: 10px 15px;
+    border-radius: 8px;
+    border-left: 4px solid #e53e3e;
+    margin: 8px 0;
+}
+
+/* Ensure the chat interface scrolls properly */
+.chat-interface-container {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-bottom: 60px; /* Give space for the input area */
+}
+
+/* Style chat interface to fill space */
+:deep(.chat-container) {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+/* Add styles for debugging item indexes */
+.item-index {
+    display: none; /* Hide this completely since we're not using it anymore */
 }
 </style>

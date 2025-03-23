@@ -7,7 +7,13 @@
                 <ScrollPanel ref="scrollPanel" class="custom-scrollbar">
                     <div v-if="chatMessages.length > 0">
                         <div v-for="item in chatMessages" :key="item.id || index" class="chat-message mb-1">
-                            <QuestionAnswerCard :chat="item" :uuid="item.id || index" @remove="handleQandARemove"/>
+                            <QuestionAnswerCard 
+                                :chat="item" 
+                                :uuid="item.id || index" 
+                                @remove="handleQandARemove" 
+                                @typing="handleTyping"
+                                @typing-progress="handleTypingProgress"
+                                typingSpeedPreset="medium"/>
                         </div>
                     </div>
                     <div v-else class="mb-3">
@@ -38,7 +44,7 @@
     </div>
 </template>
 <script setup>
-import { ref, onMounted, watch, nextTick, computed } from 'vue'
+import { ref, onMounted, watch, nextTick, computed, onUnmounted } from 'vue'
 import QuestionAnswerCard from './QuestionAnswerCard.vue'
 import { CommunicationEnum } from '../composables/utils.js'
 import ScrollPanel from 'primevue/scrollpanel'
@@ -48,6 +54,8 @@ const question = ref('')
 const processing_question = ref(false)
 const ask_question_input = ref(null)
 const scrollPanel = ref(null)
+const isActiveTyping = ref(false)
+const typingScrollInterval = ref(null)
 
 // Define the props - now accepting chat instead of doc
 const props = defineProps({
@@ -76,6 +84,71 @@ onMounted(() => {
         }, 100);
     });
 })
+
+// Handle typing events from QuestionAnswerCard components
+const handleTyping = (isTyping) => {
+    console.log('DocSummary -> handleTyping:', isTyping);
+    isActiveTyping.value = isTyping;
+    
+    // If typing has started, set up continuous scrolling
+    if (isTyping) {
+        // Clear any existing interval
+        if (typingScrollInterval.value) {
+            clearInterval(typingScrollInterval.value);
+        }
+        
+        // Set up a new interval to scroll periodically during typing
+        typingScrollInterval.value = setInterval(() => {
+            if (isActiveTyping.value) {
+                scrollToBottom(false); // Use auto scrolling during typing for better performance
+            }
+        }, 200); // Adjust frequency as needed
+    } else {
+        // If typing has stopped, clear the interval and do a final scroll
+        if (typingScrollInterval.value) {
+            clearInterval(typingScrollInterval.value);
+            typingScrollInterval.value = null;
+        }
+        
+        // Final scroll when typing is complete, with a small delay to ensure content is fully rendered
+        setTimeout(() => {
+            scrollToBottom(true);
+            
+            // Additional scroll after a longer delay to ensure stability
+            setTimeout(() => {
+                // Final auto scroll to ensure we're at the bottom
+                scrollToBottom(false);
+                
+                // Release scroll control to the user
+                const scrollPanel = document.querySelector('.p-scrollpanel-wrapper');
+                if (scrollPanel) {
+                    scrollPanel.style.pointerEvents = 'auto';
+                }
+            }, 350);
+        }, 50);
+    }
+}
+
+// Handle typing progress events for more precise scrolling
+const handleTypingProgress = (progress) => {
+    // Scroll on significant progress 
+    if (progress.progress > 0.2 && !progress.isComplete) {
+        scrollToBottom(false); // Use auto scrolling during typing for better performance
+    }
+    
+    // Final smooth scroll when complete
+    if (progress.isComplete) {
+        scrollToBottom(true);
+        
+        // Release scroll control after a delay
+        setTimeout(() => {
+            const scrollPanel = document.querySelector('.p-scrollpanel-wrapper');
+            if (scrollPanel) {
+                scrollPanel.style.pointerEvents = 'auto';
+            }
+        }, 300);
+    }
+}
 
 const handleQandARemove = (uuid) => {
     //call backend to remove the QandA and only then remove it from the UI
@@ -109,31 +182,72 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         emit('add-chat-item', newChat);
         nextTick(() => {
             setTimeout(() => {
-                scrollToBottom();
+                scrollToBottom(true);
             }, 100);
         });
     }
 })
 
-const scrollToBottom = () => {
+// Improved scrollToBottom function to prevent jittering
+const scrollToBottom = (smooth = true) => {
     if (scrollPanel.value) {
         nextTick(() => {
             const content = scrollPanel.value.$el.querySelector('.p-scrollpanel-content');
-            const allMessages = content.querySelectorAll('.chat-message');
+            const wrapper = scrollPanel.value.$el.querySelector('.p-scrollpanel-wrapper');
             
-            if (allMessages.length > 0) {
-                const lastQuestion = allMessages[allMessages.length - 1];
-                if (lastQuestion) {
-                    lastQuestion.scrollIntoView({ 
-                        behavior: 'smooth', 
-                        block: 'end',
-                        inline: 'nearest'
+            if (content && wrapper) {
+                // Calculate the scroll position needed to see the bottom
+                const scrollPosition = content.scrollHeight - wrapper.clientHeight;
+                
+                try {
+                    // Use the scrollPanel's built-in scroll method with the appropriate behavior
+                    wrapper.scrollTo({
+                        top: scrollPosition,
+                        behavior: smooth ? 'smooth' : 'auto'
                     });
+                    
+                    // If we're using smooth scrolling, temporarily disable pointer events
+                    // to prevent user interactions during the scroll animation
+                    if (smooth) {
+                        wrapper.style.pointerEvents = 'none';
+                        
+                        // Re-enable pointer events after the animation completes
+                        setTimeout(() => {
+                            wrapper.style.pointerEvents = 'auto';
+                        }, 300); // Match the default smooth scroll duration
+                    }
+                } catch (e) {
+                    console.error('Error with wrapper.scrollTo:', e);
+                    // Fallback to direct scrollTop assignment
+                    wrapper.scrollTop = scrollPosition;
+                }
+                
+                // Backup: try to find the last message and scroll to it
+                if (smooth) {
+                    const allMessages = content.querySelectorAll('.chat-message');
+                    if (allMessages.length > 0) {
+                        const lastQuestion = allMessages[allMessages.length - 1];
+                        if (lastQuestion) {
+                            lastQuestion.scrollIntoView({ 
+                                behavior: smooth ? 'smooth' : 'auto', 
+                                block: 'end',
+                                inline: 'nearest'
+                            });
+                        }
+                    }
                 }
             }
         });
     }
 }
+
+// Clean up the interval when the component is unmounted
+onUnmounted(() => {
+    if (typingScrollInterval.value) {
+        clearInterval(typingScrollInterval.value);
+        typingScrollInterval.value = null;
+    }
+});
 
 const handleAsk = () => {
     if (!question.value.trim()) return;
