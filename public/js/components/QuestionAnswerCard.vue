@@ -82,15 +82,38 @@
     
     // Computed function to format the response based on the new format
     const formattedResponse = computed(() => {
-        if (!props.chat?.response) return '';
+        if (!props.chat?.response) {
+            console.log('QuestionAnswerCard -> No response in chat:', props.chat);
+            return '';
+        }
         
         try {
-            // Try to parse the response as JSON
-            const parsedResponse = JSON.parse(props.chat.response);
-            console.log('QuestionAnswerCard -> parsedResponse:', parsedResponse)
+            console.log('QuestionAnswerCard -> Processing response:', props.chat.response);
             
-            // Check if it has the new format with summary_for_chat
+            // If response is already an object, use it directly
+            let parsedResponse = props.chat.response;
+            
+            // If it's a string, try to parse it
+            if (typeof props.chat.response === 'string') {
+                parsedResponse = JSON.parse(props.chat.response);
+                console.log('QuestionAnswerCard -> Parsed string response:', parsedResponse);
+            }
+            
+            // If parsedResponse itself is a string (double encoded), try parsing again
+            if (typeof parsedResponse === 'string') {
+                try {
+                    parsedResponse = JSON.parse(parsedResponse);
+                    console.log('QuestionAnswerCard -> Double parsed response:', parsedResponse);
+                } catch (e) {
+                    // If it fails, use the string as is
+                    console.log('QuestionAnswerCard -> Using string response as is');
+                    return parsedResponse;
+                }
+            }
+            
+            // Check if it has the new format with answer_for_chat
             if (parsedResponse.answer_for_chat) {
+                console.log('QuestionAnswerCard -> Using answer_for_chat:', parsedResponse.answer_for_chat);
                 return parsedResponse.answer_for_chat;
             }
             
@@ -102,9 +125,13 @@
                 return `${parsedResponse.answer_for_chat || ''}<ul>${bulletPoints}</ul>`;
             }
             
-            // Fallback to the original response if we can't parse it properly
-            return props.chat.response;
+            // Fallback to the original response
+            console.log('QuestionAnswerCard -> Using fallback response');
+            return typeof props.chat.response === 'string' 
+                ? props.chat.response 
+                : JSON.stringify(props.chat.response);
         } catch (e) {
+            console.error('Error formatting response:', e, props.chat.response);
             // If it's not valid JSON, just return the original response
             return props.chat.response;
         }

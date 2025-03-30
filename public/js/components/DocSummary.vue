@@ -87,7 +87,6 @@ onMounted(() => {
 
 // Handle typing events from QuestionAnswerCard components
 const handleTyping = (isTyping) => {
-    console.log('DocSummary -> handleTyping:', isTyping);
     isActiveTyping.value = isTyping;
     
     // If typing has started, set up continuous scrolling
@@ -153,6 +152,13 @@ const handleTypingProgress = (progress) => {
 const handleQandARemove = (uuid) => {
     //call backend to remove the QandA and only then remove it from the UI
     console.log('DocSummary -> Removing QandA:', uuid);
+
+    // Skip backend deletion for temporary messages
+    if (typeof uuid === 'string' && uuid.startsWith('temp-question-')) {
+        emit('remove-chat-item', uuid);
+        ask_question_input.value.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        return;
+    }
 
     //Send chrome message to remove the QandA
     chrome.runtime.sendMessage({ name: CommunicationEnum.DELETE_QANDA, uuid: uuid }, function (response) {
@@ -260,7 +266,6 @@ const handleAsk = () => {
     if (props.chat && props.chat.length > 0) {
         // First try to get it from document_id 
         document_id = props.chat[0].chat_id;
-        
     }
     
     if (!document_id) {
@@ -268,23 +273,50 @@ const handleAsk = () => {
         return;
     }
     
+    // Create a temporary message with a unique ID
+    const tempId = 'temp-question-' + Date.now();
+    const tempMessage = {
+        id: tempId,
+        created_at: new Date().toISOString(),
+        user_prompt: question.value,
+        response: null
+    };
+    
+    // Add temporary message to chat
+    emit('add-chat-item', tempMessage);
+    
     const _payload = {
         question: question.value,
         document_id: document_id
     }
     console.log('DocSummary -> asking question payload:', _payload)
     processing_question.value = true
-    chrome.runtime.sendMessage({ name: CommunicationEnum.ASK_QUESTION, payload: _payload }).then((response) => {
-        console.log('DocSummary -> asking question response:', response.answer)
-        // Emit an event to add the new chat item
-        emit('add-chat-item', response.answer);
-        processing_question.value = false
-        question.value = ''
-        nextTick(() => {
-            setTimeout(() => {
-                scrollToBottom();
-            }, 100);
-        });
+    
+    chrome.runtime.sendMessage({ 
+        name: CommunicationEnum.ASK_QUESTION, 
+        payload: _payload 
+    }).then((response) => {
+        console.log('DocSummary -> asking question response:', response.answer);
+        
+        if (response && response.answer) {
+            // Remove the temporary message
+            emit('remove-chat-item', tempId);
+            
+            // Add the real response
+            emit('add-chat-item', response.answer);
+            
+            processing_question.value = false;
+            question.value = '';
+            
+            nextTick(() => {
+                setTimeout(() => {
+                    scrollToBottom();
+                }, 100);
+            });
+        } else {
+            console.error('DocSummary -> Invalid response format:', response);
+            processing_question.value = false;
+        }
     }).catch(error => {
         console.error('Error asking question:', error);
         processing_question.value = false;

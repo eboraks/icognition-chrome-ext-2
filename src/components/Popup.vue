@@ -26,7 +26,7 @@
                 <GoogleLoginButton></GoogleLoginButton>
             </div>
 
-            <div v-if="status.state === AppStatusEnum.READY.state && (!chat_messages || chat_messages.length === 0)" class="flex flex-column align-items-center justify-content-center m-2 p-4">
+            <div v-if="status.state === AppStatusEnum.SERVER_READY.state && (!chat_messages || chat_messages.length === 0)" class="flex flex-column align-items-center justify-content-center m-2 p-4">
                 <p class="text-center mb-2">No analysis found for this page</p>
                 <Button @click="handleBookmark" label="Analyze This Page" icon="pi pi-search" class="p-button-primary"></Button>
             </div>
@@ -48,7 +48,7 @@
         </div>
 
         <!-- Ask input section - always visible -->
-        <div id="ask" class="ask-input" v-if="status.state === AppStatusEnum.READY.state || status.state === AppStatusEnum.DOCUMENT_READY.state">               
+        <div id="ask" class="ask-input" v-if="status.state === AppStatusEnum.SERVER_READY.state || status.state === AppStatusEnum.DOCUMENT_READY.state">               
             <div ref="ask_question_input" class="flex gap-2">
                 <div class="textarea-with-autocomplete flex-grow-1">
                     <Textarea 
@@ -108,7 +108,8 @@
         <div v-if="debug_mode" class="debug surface-ground p-2 border-top-1 border-primary-100">
             <p class="text-sm text-600 mb-1">Status: {{ status.state }}</p>
             <p class="text-sm text-600 mb-1">Status Message: {{ statusMessage }}</p>
-            <p class="text-sm text-600 mb-1">Document: {{ doc?.id }}</p>
+            <p class="text-sm text-600 mb-1">Document ID: {{ doc?.id }}</p>
+            <p class="text-sm text-600 mb-1">Document ID (URL Cache): {{ active_tab?.url ? documentIdsByUrl[cleanUrl(active_tab.url)] : 'No active tab' }}</p>
             <p class="text-sm text-600 mb-1">User: {{ user?.uid }}</p>
             <p class="text-sm text-600">Progress Percent: {{ progressPercent }}</p>
         </div>
@@ -143,10 +144,9 @@ const AppStatusEnum = {
         message: null,
         severity: 'info'
     },
-    READY: {
-        state: 'ready',
-        message: null,
-        severity: 'info'
+    SERVER_READY: {
+        state: 'server_ready',
+        message: 'Ready to analyze'
     },
     PROCESSING: {
         state: 'processing',
@@ -196,6 +196,9 @@ const questionTextarea = ref(null);
 onMounted(async () => {
     console.log('SidePanel component mounted');
     
+    // Establish connection with background script to indicate side panel is open
+    const port = chrome.runtime.connect({ name: 'sidepanel' });
+    
     // Check if server is running
     chrome.runtime.sendMessage({ name: 'server-is' }).then((response) => {
         console.log('Status -> server-is', response)
@@ -203,8 +206,8 @@ onMounted(async () => {
             // If server is up, check user state
             chrome.storage.session.get(["session_user"]).then((session) => {
                 if (session.session_user) {
-                    status.value = AppStatusEnum.READY
-                    statusMessage.value = AppStatusEnum.READY.message
+                    status.value = AppStatusEnum.SERVER_READY
+                    statusMessage.value = AppStatusEnum.SERVER_READY.message
                     user.value = session.session_user
                     console.log('User authenticated, status:', status.value.state);
                 } else {
@@ -302,7 +305,7 @@ const handleTabChange = (tab) => {
     bookmark.value = null;
     doc.value = null;
     progressPercent.value = 5;
-    status.value = AppStatusEnum.READY; // Reset to READY state
+    status.value = AppStatusEnum.SERVER_READY; // Reset to SERVER_READY state
     statusMessage.value = null; // Clear any error messages
     console.log('Reset chat, bookmark, and doc');
     
@@ -318,8 +321,8 @@ const handleTabChange = (tab) => {
         }
     } else if (user.value) {
         // If no saved chat but user is logged in, check for bookmarks
-        status.value = AppStatusEnum.READY;
-        console.log('No saved chat, user logged in, setting status to READY');
+        status.value = AppStatusEnum.SERVER_READY;
+        console.log('No saved chat, user logged in, setting status to SERVER_READY');
         console.log('Searching bookmarks for URL:', currentUrl);
         searchBookmarksByUrl(currentUrl);
     } else {
@@ -334,7 +337,7 @@ const handleTabChange = (tab) => {
 watch(user, (after, before) => {
     if (after) {
         console.log('User logged in! ', user.value)
-        status.value = AppStatusEnum.READY
+        status.value = AppStatusEnum.SERVER_READY
         if (active_tab.value) {
             searchBookmarksByUrl(active_tab.value.url);
         }
@@ -392,12 +395,12 @@ const searchBookmarksByUrl = async (url) => {
 
             if (!found) {
                 console.log('No bookmarks found in local storage for URL:', cleanedUrl);
-                // Explicitly set status to READY to show the Analyze button
-                status.value = AppStatusEnum.READY;
-                console.log('Setting status to READY (no bookmark found)');
+                // Explicitly set status to SERVER_READY to show the Analyze button
+                status.value = AppStatusEnum.SERVER_READY;
+                console.log('Setting status to SERVER_READY (no bookmark found)');
                 return;
             } else {
-                status.value = AppStatusEnum.READY;
+                status.value = AppStatusEnum.SERVER_READY;
                 bookmark.value = found;
                 console.log('Found bookmark:', bookmark.value);
                 console.log('Fetching chat for document ID:', bookmark.value.document_id);
@@ -411,9 +414,9 @@ const searchBookmarksByUrl = async (url) => {
             return;
         }
     } else {
-        // No bookmarks at all, set status to READY to show the Analyze button
-        status.value = AppStatusEnum.READY;
-        console.log('No bookmarks in storage, setting status to READY');
+        // No bookmarks at all, set status to SERVER_READY to show the Analyze button
+        status.value = AppStatusEnum.SERVER_READY;
+        console.log('No bookmarks in storage, setting status to SERVER_READY');
     }
 }
 
@@ -432,23 +435,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.name === CommunicationEnum.CHAT_READY) {
-        console.log('Chat ready -> request:', request)
+        console.log('Chat ready -> request:', request);
+        console.log('Chat ready -> request.data type:', typeof request.data);
+        console.log('Chat ready -> request.data:', request.data);
+        
         // Make sure we're setting chat_messages to an array
         if (Array.isArray(request.data)) {
             chat_messages.value = request.data;
-            progressPercent.value = 100;
+            console.log('Chat ready -> set array directly:', chat_messages.value);
         } else {
             // If it's not an array, create an array with the single item
             chat_messages.value = [request.data];
             console.log('Chat ready -> converted non-array to array:', chat_messages.value);
         }
         
-        status.value = AppStatusEnum.DOCUMENT_READY
-        console.log('Chat ready -> chat_messages.value:', chat_messages.value)
+        status.value = AppStatusEnum.DOCUMENT_READY;
+        console.log('Chat ready -> chat_messages.value:', chat_messages.value);
         
         // Save chat for current URL
         if (active_tab.value && active_tab.value.url) {
             chatsByUrl.value[cleanUrl(active_tab.value.url)] = [...chat_messages.value];
+            console.log('Chat ready -> saved to chatsByUrl:', chatsByUrl.value[cleanUrl(active_tab.value.url)]);
         }
         
         // Force a refresh of the DocSummary component
@@ -582,7 +589,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.name === 'question-answers-ready') {
         console.log('document-ready -> request', request)
         doc.value = request.data
-        status.value = AppStatusEnum.READY
+        status.value = AppStatusEnum.SERVER_READY
         sendResponse({ message: 'document-ready recived' })
     }
 
@@ -611,7 +618,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
                     searchBookmarksByUrl(active_tab.value.url)
                 } else {
                    //Set status to ready
-                   status.value = AppStatusEnum.READY
+                   status.value = AppStatusEnum.SERVER_READY
                 }
             }
         }
@@ -633,7 +640,12 @@ const handleBookmark = async () => {
         console.log('handleBookmark -> response:', response)
 
         if (response.status === 201) {
-            bookmark.value = response.content
+            // Clean the URL in the bookmark before storing
+            const cleanedBookmark = { ...response.content };
+            if (cleanedBookmark.url) {
+                cleanedBookmark.url = cleanUrl(cleanedBookmark.url);
+            }
+            bookmark.value = cleanedBookmark;
             status.value = AppStatusEnum.PROCESSING
             
             // Save bookmark for current URL
@@ -641,7 +653,12 @@ const handleBookmark = async () => {
                 bookmarksByUrl.value[cleanUrl(active_tab.value.url)] = {...bookmark.value};
             }
         } else if (response.status === 200) {
-            bookmark.value = response.content
+            // Clean the URL in the bookmark before storing
+            const cleanedBookmark = { ...response.content };
+            if (cleanedBookmark.url) {
+                cleanedBookmark.url = cleanUrl(cleanedBookmark.url);
+            }
+            bookmark.value = cleanedBookmark;
             
             // Save bookmark for current URL
             if (active_tab.value && active_tab.value.url) {
@@ -670,7 +687,7 @@ const fetchChat = async (document_id) => {
         document_id: document_id 
     }).then((chatResponse) => {
         console.log('fetch-chat response:', chatResponse)
-        if (chatResponse && chatResponse.success && chatResponse.chat) {
+        if (chatResponse && chatResponse.success && chatResponse.chat.length > 0) {
             chat_messages.value = chatResponse.chat;
             status.value = AppStatusEnum.DOCUMENT_READY;
             
@@ -679,6 +696,8 @@ const fetchChat = async (document_id) => {
                 chatsByUrl.value[cleanUrl(active_tab.value.url)] = [...chat_messages.value];
                 documentIdsByUrl.value[cleanUrl(active_tab.value.url)] = document_id;
             }
+        } else if (chatResponse && chatResponse.success && chatResponse.chat.length === 0) {
+            console.error('Chat messages are empty:', chatResponse?.error || 'Probably not ready yet'); 
         } else {
             console.error('Failed to fetch chat messages:', chatResponse?.error || 'Unknown error');
             handleError('Failed to fetch chat messages');
@@ -723,20 +742,65 @@ const getCurrentPageTitle = () => {
     return 'Current Page';
 }
 
-const clearCurrentChat = () => {
+const clearCurrentChat = async () => {
     if (active_tab.value && active_tab.value.url) {
         const currentUrl = cleanUrl(active_tab.value.url);
         
-        // Clear chat for current URL
-        delete chatsByUrl.value[currentUrl];
-        delete bookmarksByUrl.value[currentUrl];
-        delete documentIdsByUrl.value[currentUrl];
-        
-        // Reset current state
-        chat_messages.value = null;
-        bookmark.value = null;
-        doc.value = null;
-        status.value = AppStatusEnum.READY;
+        // Get the current bookmark ID
+        const currentBookmark = bookmarksByUrl.value[currentUrl];
+        if (currentBookmark && currentBookmark.id) {
+            // Delete the bookmark from the server
+            try {
+                const response = await chrome.runtime.sendMessage({
+                    name: 'delete-bookmark',
+                    bookmarkId: currentBookmark.id
+                });
+                
+                if (response.success) {
+                    // Clear chat for current URL
+                    delete chatsByUrl.value[currentUrl];
+                    delete bookmarksByUrl.value[currentUrl];
+                    delete documentIdsByUrl.value[currentUrl];
+                    
+                    // Reset current state
+                    chat_messages.value = null;
+                    bookmark.value = null;
+                    doc.value = null;
+                    status.value = AppStatusEnum.SERVER_READY;
+                    
+                    // Send message to background script to update badge
+                    chrome.runtime.sendMessage({
+                        name: 'update-badge',
+                        tabId: active_tab.value.id,
+                        hasBookmark: false
+                    });
+                } else {
+                    console.error('Failed to delete bookmark:', response.error);
+                    handleError('Failed to delete bookmark');
+                }
+            } catch (error) {
+                console.error('Error deleting bookmark:', error);
+                handleError('Error deleting bookmark');
+            }
+        } else {
+            // If no bookmark ID, just clear the local state
+            delete chatsByUrl.value[currentUrl];
+            delete bookmarksByUrl.value[currentUrl];
+            delete documentIdsByUrl.value[currentUrl];
+            
+            // Reset current state
+            chat_messages.value = null;
+            bookmark.value = null;
+            doc.value = null;
+            status.value = AppStatusEnum.SERVER_READY;
+            
+            // Send message to background script to update badge
+            chrome.runtime.sendMessage({
+                name: 'update-badge',
+                tabId: active_tab.value.id,
+                hasBookmark: false
+            });
+        }
     }
 }
 
@@ -1157,7 +1221,6 @@ const handleAsk = () => {
     showAutocomplete.value = false;
     
     // Send message to background script to ask the question
-    // IMPORTANT: Maintain the exact payload format that the backend expects
     chrome.runtime.sendMessage({
         name: CommunicationEnum.ASK_QUESTION,
         payload: {
@@ -1171,46 +1234,23 @@ const handleAsk = () => {
         if (response && response.answer) {
             console.log('Got immediate answer:', response.answer);
             
-            // The websocket will handle displaying the answer, but we'll add a fallback
-            // Wait a bit to see if websocket delivers the message
-            setTimeout(() => {
-                // Check if any non-temporary messages were added since we sent the question
-                const latestMessages = chat_messages.value.filter(msg => 
-                    !msg.id || (typeof msg.id === 'string' && !msg.id.startsWith('temp-question-'))
-                );
-                
-                // If no new messages, use the direct response
-                if (latestMessages.length === chat_messages.value.length - 1) {
-                    console.log('No websocket message received, using direct response');
-                    // Create a message from the response
-                    const answerMessage = {
-                        id: response.answer.id || ('answer-' + Date.now()),
-                        created_at: response.answer.created_at || new Date().toISOString(),
-                        user_id: response.answer.user_id || 'system',
-                        chat_id: documentId,
-                        chat_type: response.answer.chat_type || 'document',
-                        user_prompt: questionText,
-                        event_name: response.answer.event_name || 'answer',
-                        response: response.answer.response
-                    };
-                    
-                    // Replace the temporary message with the real one
-                    chat_messages.value = chat_messages.value.filter(msg => 
-                        !msg.id || (typeof msg.id === 'string' && !msg.id.startsWith('temp-question-'))
-                    );
-                    chat_messages.value.push(answerMessage);
-                    
-                    // Save updated chat for current URL
-                    if (active_tab.value && active_tab.value.url) {
-                        chatsByUrl.value[cleanUrl(active_tab.value.url)] = [...chat_messages.value];
-                    }
-                    
-                    // Scroll to bottom to show the answer
-                    nextTick(() => {
-                        scrollChatToBottom();
-                    });
-                }
-            }, 2000); // Give the websocket 2 seconds to deliver the message
+            // Remove any temporary messages for this question
+            chat_messages.value = chat_messages.value.filter(msg => 
+                !msg.id || (typeof msg.id === 'string' && !msg.id.startsWith('temp-question-'))
+            );
+            
+            // Add the answer immediately
+            chat_messages.value.push(response.answer);
+            
+            // Save updated chat for current URL
+            if (active_tab.value && active_tab.value.url) {
+                chatsByUrl.value[cleanUrl(active_tab.value.url)] = [...chat_messages.value];
+            }
+            
+            // Scroll to bottom to show the answer
+            nextTick(() => {
+                scrollChatToBottom();
+            });
         }
     }).catch(error => {
         console.error('Error asking question:', error);

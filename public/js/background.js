@@ -3,6 +3,7 @@ import { cleanUrl, CommunicationEnum } from './composables/utils.js'
 
 const user = ref(null)
 const socket = ref(null)
+let isSidePanelOpen = false; // Track side panel state
 
 const base_url = import.meta.env.VITE_BASE_URL || 'http://localhost:8889'
 console.log('base_url: ', base_url)
@@ -18,6 +19,7 @@ const Endpoints = {
     chat: '/document/{id}/chat',
     ask_question: '/ask_question',
     delete_chat_message: '/chat_message/{id}',
+    delete_bookmark: '/bookmark/{id}',
 }
 
 // Listen to changes in storage and if session_user changes, refresh the bookmarks cache, or delete the cache if the user logs out
@@ -311,6 +313,8 @@ async function postBookmark(tab){
     
 
     try {
+        // Clean the URL before sending to server
+        const cleanedUrl = cleanUrl(tab.url);
         let response = await fetch(`${base_url}${Endpoints.bookmark}`, {
             method: 'post',
             headers: {
@@ -318,7 +322,7 @@ async function postBookmark(tab){
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                url: tab.url,
+                url: cleanedUrl,
                 html: html, 
                 user_id: session_user.session_user.uid
             }),
@@ -381,8 +385,17 @@ async function fetch_retry(url, options, n) {
     }
 }
 
-const searchServerBookmarksByUrl = async (user_id, url) => {
+const searchBookmarksByUrl = async (user_id, url) => {
+    // Only search if side panel is open
+    if (!isSidePanelOpen) {
+        console.log('Side panel is closed, skipping bookmark search');
+        return { bookmark: undefined, error: null };
+    }
+
     try {
+        const cleanedUrl = cleanUrl(url);
+        console.log('searchBookmarksByUrl -> url:', cleanedUrl);
+        
         let response = await fetch(`${base_url}${Endpoints.user_bookmark}`, {
             method: 'post',
             headers: {
@@ -390,31 +403,23 @@ const searchServerBookmarksByUrl = async (user_id, url) => {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                url: url,
+                url: cleanedUrl,
                 html: "",
                 user_id: user_id
             }),
         });
-        console.log('searchServerBookmarkByUrl -> response: ', response);
         
         if (response.status === 404) {
             const error = await response.json();
-            console.log('searchServerBookmarkByUrl -> error: ', error);
+            console.log('searchBookmarkByUrl -> error: ', error);
             return { bookmark: undefined, error: error };
         }
         
-        if (response.status === 200) {
-            const bookmark = await response.json();
-            console.log('searchServerBookmarkByUrl -> success: ', bookmark);
-            return { bookmark: bookmark, error: null };
-        }
-        
-        // Handle any other status codes
-        const error = await response.json();
-        return { bookmark: undefined, error: error };
-    }
-    catch (err) {
-        console.error('searchServerBookmarkByUrl -> error: ', err);
+        const data = await response.json();
+        console.log('searchBookmarkByUrl -> data: ', data);
+        return { bookmark: data, error: null };
+    } catch (err) {
+        console.error('searchBookmarkByUrl -> error: ', err);
         return { bookmark: undefined, error: err };
     }
 }
@@ -645,17 +650,32 @@ async function sendDocumentToSidePanel(document) {
 }
 
  
-async function storeBookmarks(new_bookmarks) { 
+function storeBookmarks(new_bookmarks) { 
     
     if (!Array.isArray(new_bookmarks)) new_bookmarks = [new_bookmarks]
     
+    // Clean URLs in new bookmarks before storing
+    new_bookmarks = new_bookmarks.map(bookmark => {
+        if (bookmark && bookmark.url) {
+            return { ...bookmark, url: cleanUrl(bookmark.url) };
+        }
+        return bookmark;
+    });
+    
     chrome.storage.local.get(["bookmarks"]).then((value) => {
         let bkmks = value.bookmarks || [];
+        // Clean URLs in existing bookmarks if needed
+        bkmks = bkmks.map(bookmark => {
+            if (bookmark && bookmark.url) {
+                return { ...bookmark, url: cleanUrl(bookmark.url) };
+            }
+            return bookmark;
+        });
         bkmks = Array.from(new Set([...bkmks, ...new_bookmarks]));
         chrome.storage.local.set({ bookmarks: bkmks }).then(() => {
             console.log("Bookmarks storage updated", bkmks);
         });
-    });  // chrome.storage.local.set({ 'https://www.thecurrent.com/what-the-tech-open-internet': 'something to store'})
+    });  
 }
 
 
@@ -666,7 +686,10 @@ async function searchBookmarksByUrl(url) {
     const session_user = await chrome.storage.session.get(["session_user"])
     if (!session_user.session_user) return console.log('searchBookmarksByUrl -> user not authenticated')
 
-    console.log('searchBookmarksByUrl -> user: ', session_user)
+    // Clean URL at the start
+    const cleanedUrl = cleanUrl(url);
+    console.log('searchBookmarksByUrl -> searching for cleaned URL:', cleanedUrl);
+
     const value = await chrome.storage.local.get(["bookmarks"]);
     console.log('searchBookmarksByUrl -> value: ', value)
 
@@ -676,10 +699,15 @@ async function searchBookmarksByUrl(url) {
 
     if (!value.bookmarks) {
         console.log('searchBookmarksByUrl -> no bookmarks found in local storage, calling server')
-        const bookmark = await searchServerBookmarksByUrl(session_user.session_user.uid, url)
+        const bookmark = await searchBookmarksByUrl(session_user.session_user.uid, cleanedUrl)
         return bookmark
     } else {
-        const found = value.bookmarks.find(bookmark => bookmark.url == cleanUrl(url));
+        const found = value.bookmarks.find(bookmark => bookmark.url === cleanedUrl);
+        if (!found) {
+            console.log('searchBookmarksByUrl -> no bookmarks found in local storage, calling server')
+            const bookmark = await searchBookmarksByUrl(session_user.session_user.uid, cleanedUrl)
+            return bookmark
+        }
         return found
     }
 }
@@ -820,6 +848,26 @@ chrome.runtime.onInstalled.addListener(() => {
             console.log('Initial active tab ID stored:', tabs[0].id);
         }
     });
+});
+
+// Track side panel state
+chrome.runtime.onConnect.addListener((port) => {
+    if (port.name === 'sidepanel') {
+        console.log('Side panel opened');
+        isSidePanelOpen = true;
+        
+        // When side panel is opened, check bookmarks for current tab
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs && tabs[0]) {
+                badgeToggle(tabs[0]);
+            }
+        });
+
+        port.onDisconnect.addListener(() => {
+            console.log('Side panel closed');
+            isSidePanelOpen = false;
+        });
+    }
 });
 
 // Handle opening the side panel when the extension icon is clicked
@@ -965,4 +1013,51 @@ chrome.runtime.onSuspend.addListener(() => {
 chrome.runtime.onStartup.addListener(() => {
     console.log('Extension starting up, initializing WebSocket');
     registerWebSocketConnection();
+});
+
+// Add deleteBookmark function
+const deleteBookmark = async (bookmarkId) => {
+    try {
+        const url = `${base_url}${Endpoints.delete_bookmark.replace('{id}', bookmarkId)}`;
+        const response = await fetch(url, {
+            method: 'DELETE',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+            }
+        });
+        
+        if (response.status === 204) {
+            console.log('Bookmark deleted successfully');
+            return { success: true };
+        } else {
+            const error = await response.json();
+            console.error('Error deleting bookmark:', error);
+            return { success: false, error };
+        }
+    } catch (err) {
+        console.error('Error deleting bookmark:', err);
+        return { success: false, error: err };
+    }
+}
+
+// Add message handler for delete bookmark
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.name === 'delete-bookmark') {
+        console.log('Deleting bookmark:', request.bookmarkId);
+        deleteBookmark(request.bookmarkId).then((result) => {
+            sendResponse(result);
+        });
+        return true;
+    }
+    else if (request.name === 'update-badge') {
+        console.log('Updating badge for tab:', request.tabId, 'hasBookmark:', request.hasBookmark);
+        if (request.hasBookmark) {
+            badgeOn(request.tabId);
+        } else {
+            badgeOff(request.tabId);
+        }
+        return true;
+    }
+    // ... rest of existing message handlers ...
 });
