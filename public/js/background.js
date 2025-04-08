@@ -395,7 +395,22 @@ const searchBookmarksByUrl = async (user_id, url) => {
     try {
         const cleanedUrl = cleanUrl(url);
         console.log('searchBookmarksByUrl -> url:', cleanedUrl);
-        
+
+        // First check local storage
+        const value = await chrome.storage.local.get(["bookmarks"]);
+        console.log('searchBookmarksByUrl -> local storage value:', value);
+
+        if (value.bookmarks) {
+            value.bookmarks = value.bookmarks.filter(bookmark => bookmark !== null && bookmark !== undefined);
+            const found = value.bookmarks.find(bookmark => bookmark.url === cleanedUrl);
+            if (found) {
+                console.log('searchBookmarksByUrl -> found in local storage:', found);
+                return { bookmark: found, error: null };
+            }
+        }
+
+        // If not found locally, search server
+        console.log('searchBookmarksByUrl -> not found in local storage, searching server');
         let response = await fetch(`${base_url}${Endpoints.user_bookmark}`, {
             method: 'post',
             headers: {
@@ -416,7 +431,7 @@ const searchBookmarksByUrl = async (user_id, url) => {
         }
         
         const data = await response.json();
-        console.log('searchBookmarkByUrl -> data: ', data);
+        console.log('searchBookmarkByUrl -> server data: ', data);
         return { bookmark: data, error: null };
     } catch (err) {
         console.error('searchBookmarkByUrl -> error: ', err);
@@ -681,37 +696,6 @@ function storeBookmarks(new_bookmarks) {
 
 
 
-async function searchBookmarksByUrl(url) {
-
-    const session_user = await chrome.storage.session.get(["session_user"])
-    if (!session_user.session_user) return console.log('searchBookmarksByUrl -> user not authenticated')
-
-    // Clean URL at the start
-    const cleanedUrl = cleanUrl(url);
-    console.log('searchBookmarksByUrl -> searching for cleaned URL:', cleanedUrl);
-
-    const value = await chrome.storage.local.get(["bookmarks"]);
-    console.log('searchBookmarksByUrl -> value: ', value)
-
-    if (value.bookmarks) {
-        value.bookmarks = value.bookmarks.filter(bookmark => bookmark !== null && bookmark !== undefined);
-    }
-
-    if (!value.bookmarks) {
-        console.log('searchBookmarksByUrl -> no bookmarks found in local storage, calling server')
-        const bookmark = await searchBookmarksByUrl(session_user.session_user.uid, cleanedUrl)
-        return bookmark
-    } else {
-        const found = value.bookmarks.find(bookmark => bookmark.url === cleanedUrl);
-        if (!found) {
-            console.log('searchBookmarksByUrl -> no bookmarks found in local storage, calling server')
-            const bookmark = await searchBookmarksByUrl(session_user.session_user.uid, cleanedUrl)
-            return bookmark
-        }
-        return found
-    }
-}
-
 const badgeOn = (tabId) => {
     chrome.action.setBadgeBackgroundColor(
         {color: 'rgba(22, 169, 32, 1)'},  // Also green
@@ -726,11 +710,10 @@ const badgeOff = (tabId) => {
 }
 
 const badgeToggle = async (tab) => {
-    
     console.log('badgeToggle -> url: ', tab.url)
-    const bookmark = await searchBookmarksByUrl(tab.url)
-    if (bookmark != undefined) {
-        console.log('badgeToggle -> bookmark found: ', bookmark)
+    const result = await searchBookmarksByUrl(user.value?.uid, tab.url)
+    if (result.bookmark != undefined) {
+        console.log('badgeToggle -> bookmark found: ', result.bookmark)
         badgeOn(tab.tabId)
     } else {
         console.log('badgeToggle -> bookmark not found')

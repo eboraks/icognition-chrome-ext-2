@@ -27,8 +27,14 @@
             </div>
 
             <div v-if="status.state === AppStatusEnum.SERVER_READY.state && (!chat_messages || chat_messages.length === 0)" class="flex flex-column align-items-center justify-content-center m-2 p-4">
-                <p class="text-center mb-2">No analysis found for this page</p>
-                <Button @click="handleBookmark" label="Analyze This Page" icon="pi pi-search" class="p-button-primary"></Button>
+                <div v-if="isSearchingBookmark" class="flex flex-column align-items-center">
+                    <ProgressSpinner style="width:50px;height:50px" strokeWidth="3" fill="var(--surface-ground)" animationDuration="2s"/>
+                    <p class="text-center mt-2">Checking for existing analysis...</p>
+                </div>
+                <div v-else>
+                    <p class="text-center mb-2">No analysis found for this page</p>
+                    <Button @click="handleBookmark" label="Analyze This Page" icon="pi pi-search" class="p-button-primary"></Button>
+                </div>
             </div>
         </div>
 
@@ -125,6 +131,7 @@ import ProgressBar from 'primevue/progressbar';
 import Message from 'primevue/message';
 import useAuth from '../../public/js/composables/useAuth.js';
 import Textarea from 'primevue/textarea';
+import ProgressSpinner from 'primevue/progressspinner';
 
 const { handleSignOut } = useAuth()
 
@@ -176,7 +183,7 @@ const debug_mode = ref(true) // TODO: Remove this before production
 const library_url = ref(import.meta.env.VITE_ICOGNITION_APP_URL || 'https://app.icognition.ai')
 const progressPercent = ref(5)
 const user = ref(null)
-const suggestedQuestions = ref(['What is the name of the company, this is a long question, very long question that I am asking?', 'What is the name of the product?', 'What is the name of the service?', 'What is the name of the person?', 'What is the name of the place?'])
+const suggestedQuestions = ref( [])
 const selectedQuestion = ref('')
 const filteredQuestions = ref([])
 
@@ -192,6 +199,9 @@ const showAutocomplete = ref(false);
 const activeIndex = ref(-1);
 const allowBlurToHide = ref(true);
 const questionTextarea = ref(null);
+
+// Add this ref to track search state
+const isSearchingBookmark = ref(false);
 
 onMounted(async () => {
     console.log('SidePanel component mounted');
@@ -222,28 +232,20 @@ onMounted(async () => {
         }
     })
 
-    // Set up tab change listeners
-    window.addEventListener('tab-changed', (event) => {
-        console.log('Tab change event received:', event.detail);
-        handleTabChange(event.detail);
-    });
-    
-    // Set up tab change listeners
+    // Set up tab change listeners - use a single source of truth
     chrome.tabs.onActivated.addListener(async (activeInfo) => {
         console.log('Tab activated event fired with tabId:', activeInfo.tabId);
         const tab = await chrome.tabs.get(activeInfo.tabId);
         console.log('Retrieved tab info:', tab);
         if (tab && tab.url) {
-            console.log('Dispatching tab-changed event for URL:', tab.url);
-            window.dispatchEvent(new CustomEvent('tab-changed', { detail: tab }));
+            handleTabChange(tab);
         }
     });
     
     chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
         console.log('Tab updated event fired:', { tabId, changeInfo, url: tab.url });
         if (changeInfo.status === 'complete' && tab.url) {
-            console.log('Tab load complete, dispatching tab-changed event for URL:', tab.url);
-            window.dispatchEvent(new CustomEvent('tab-changed', { detail: tab }));
+            handleTabChange(tab);
         }
     });
     
@@ -252,10 +254,7 @@ onMounted(async () => {
         console.log('Initial tab query result:', tabs);
         if (tabs && tabs[0]) {
             console.log('Setting initial tab:', tabs[0]);
-            active_tab.value = tabs[0];
-            if (user.value) {
-                searchBookmarksByUrl(tabs[0].url);
-            }
+            handleTabChange(tabs[0]);
         }
     });
 
@@ -268,6 +267,12 @@ onUnmounted(() => {
 });
 
 const handleTabChange = (tab) => {
+    // Prevent duplicate processing if the URL hasn't changed
+    if (active_tab.value?.url === tab.url) {
+        console.log('Tab URL unchanged, skipping processing');
+        return;
+    }
+
     console.log('handleTabChange called with tab:', tab);
     
     if (!tab || !tab.url) {
@@ -305,8 +310,6 @@ const handleTabChange = (tab) => {
     bookmark.value = null;
     doc.value = null;
     progressPercent.value = 5;
-    status.value = AppStatusEnum.SERVER_READY; // Reset to SERVER_READY state
-    statusMessage.value = null; // Clear any error messages
     console.log('Reset chat, bookmark, and doc');
     
     // Check if we have a saved chat for this URL
@@ -321,8 +324,9 @@ const handleTabChange = (tab) => {
         }
     } else if (user.value) {
         // If no saved chat but user is logged in, check for bookmarks
-        status.value = AppStatusEnum.SERVER_READY;
-        console.log('No saved chat, user logged in, setting status to SERVER_READY');
+        // Don't set status here, let searchBookmarksByUrl handle it
+        isSearchingBookmark.value = true;
+        console.log('No saved chat, user logged in, searching bookmarks');
         console.log('Searching bookmarks for URL:', currentUrl);
         searchBookmarksByUrl(currentUrl);
     } else {
@@ -358,65 +362,64 @@ const searchBookmarksByUrl = async (url) => {
     
     if (!url) {
         console.log('searchBookmarksByUrl -> url is null')
-        return
+        isSearchingBookmark.value = false;
+        return;
     }
     
     if (!user.value) {
         console.log('searchBookmarksByUrl -> user not authenticated')
-        return
+        isSearchingBookmark.value = false;
+        return;
     }
 
     const cleanedUrl = cleanUrl(url);
     console.log('searchBookmarksByUrl cleaned URL:', cleanedUrl);
     
-    // Check if we already have a chat for this URL
-    if (chatsByUrl.value[cleanedUrl] && chatsByUrl.value[cleanedUrl].length > 0) {
-        console.log('Found chat in memory for URL:', cleanedUrl);
-        chat_messages.value = chatsByUrl.value[cleanedUrl];
-        bookmark.value = bookmarksByUrl.value[cleanedUrl] || null;
-        status.value = AppStatusEnum.DOCUMENT_READY;
-        console.log('Setting status to DOCUMENT_READY (found chat in memory)');
-        return;
-    }
-
-    const value = await chrome.storage.local.get(["bookmarks"]);
-    console.log('Got bookmarks from storage:', value.bookmarks ? value.bookmarks.length : 0);
-
-    if (value.bookmarks) {
-        value.bookmarks = value.bookmarks.filter(bookmark => bookmark != null && bookmark !== undefined);
-        console.log('Filtered bookmarks count:', value.bookmarks.length);
-    }
-
-    if (value.bookmarks) {
-        let found;
-        try {
-            found = value.bookmarks.find(bookmark => bookmark.url == cleanedUrl);
-            console.log('Bookmark found for URL:', found ? 'Yes' : 'No');
-
-            if (!found) {
-                console.log('No bookmarks found in local storage for URL:', cleanedUrl);
-                // Explicitly set status to SERVER_READY to show the Analyze button
-                status.value = AppStatusEnum.SERVER_READY;
-                console.log('Setting status to SERVER_READY (no bookmark found)');
-                return;
-            } else {
-                status.value = AppStatusEnum.SERVER_READY;
-                bookmark.value = found;
-                console.log('Found bookmark:', bookmark.value);
-                console.log('Fetching chat for document ID:', bookmark.value.document_id);
-                fetchChat(bookmark.value.document_id);
-                return;
-            }
-
-        } catch (error) {
-            console.error('Error searching bookmarks by URL:', error);
-            handleError('Error searching bookmarks');
+    try {
+        // Check if we already have a chat for this URL in memory
+        if (chatsByUrl.value[cleanedUrl] && chatsByUrl.value[cleanedUrl].length > 0) {
+            console.log('Found chat in memory for URL:', cleanedUrl);
+            chat_messages.value = chatsByUrl.value[cleanedUrl];
+            bookmark.value = bookmarksByUrl.value[cleanedUrl] || null;
+            status.value = AppStatusEnum.DOCUMENT_READY;
+            console.log('Setting status to DOCUMENT_READY (found chat in memory)');
             return;
         }
-    } else {
-        // No bookmarks at all, set status to SERVER_READY to show the Analyze button
+
+        // Check local storage first
+        const value = await chrome.storage.local.get(["bookmarks"]);
+        console.log('Got bookmarks from storage:', value.bookmarks ? value.bookmarks.length : 0);
+
+        if (value.bookmarks) {
+            value.bookmarks = value.bookmarks.filter(bookmark => bookmark != null && bookmark !== undefined);
+            console.log('Filtered bookmarks count:', value.bookmarks.length);
+            
+            const found = value.bookmarks.find(bookmark => bookmark.url === cleanedUrl);
+            if (found) {
+                console.log('Found bookmark in local storage:', found);
+                bookmark.value = found;
+                console.log('Fetching chat for document ID:', bookmark.value.document_id);
+                const chatFetched = await fetchChat(bookmark.value.document_id);
+                if (!chatFetched) {
+                    status.value = AppStatusEnum.SERVER_READY;
+                }
+                return;
+            }
+        }
+
+        // If we reach here, no bookmark was found locally
+        console.log('No bookmarks found in local storage, setting SERVER_READY status');
         status.value = AppStatusEnum.SERVER_READY;
-        console.log('No bookmarks in storage, setting status to SERVER_READY');
+
+    } catch (error) {
+        console.error('Error searching bookmarks by URL:', error);
+        handleError('Error searching bookmarks');
+        status.value = AppStatusEnum.SERVER_READY;
+    } finally {
+        // Only set isSearchingBookmark to false if we're not in DOCUMENT_READY state
+        if (status.value.state !== AppStatusEnum.DOCUMENT_READY.state) {
+            isSearchingBookmark.value = false;
+        }
     }
 }
 
@@ -682,12 +685,25 @@ const handleBookmark = async () => {
 
 const fetchChat = async (document_id) => {
     console.log('fetchChat -> document_id:', document_id)
-    chrome.runtime.sendMessage({ 
-        name: CommunicationEnum.FETCH_CHAT, 
-        document_id: document_id 
-    }).then((chatResponse) => {
+    console.log('fetchChat 1 -> isSearchingBookmark:', isSearchingBookmark.value)
+    
+    try {
+        const chatResponse = await new Promise((resolve, reject) => {
+            chrome.runtime.sendMessage({ 
+                name: CommunicationEnum.FETCH_CHAT, 
+                document_id: document_id 
+            }, (response) => {
+                if (chrome.runtime.lastError) {
+                    reject(chrome.runtime.lastError);
+                } else {
+                    resolve(response);
+                }
+            });
+        });
+
         console.log('fetch-chat response:', chatResponse)
         if (chatResponse && chatResponse.success && chatResponse.chat.length > 0) {
+            console.log('fetchChat 2 -> isSearchingBookmark:', isSearchingBookmark.value)
             chat_messages.value = chatResponse.chat;
             status.value = AppStatusEnum.DOCUMENT_READY;
             
@@ -696,16 +712,20 @@ const fetchChat = async (document_id) => {
                 chatsByUrl.value[cleanUrl(active_tab.value.url)] = [...chat_messages.value];
                 documentIdsByUrl.value[cleanUrl(active_tab.value.url)] = document_id;
             }
+            return true;
         } else if (chatResponse && chatResponse.success && chatResponse.chat.length === 0) {
             console.error('Chat messages are empty:', chatResponse?.error || 'Probably not ready yet'); 
+            return false;
         } else {
             console.error('Failed to fetch chat messages:', chatResponse?.error || 'Unknown error');
             handleError('Failed to fetch chat messages');
+            return false;
         }
-    }).catch(error => {
+    } catch (error) {
         console.error('Error fetching chat messages:', error);
         handleError('Error fetching chat messages');
-    });
+        return false;
+    }
 }
 
 // Add these methods to handle the events
@@ -1190,11 +1210,8 @@ const handleAsk = () => {
         chat_type: 'document',
         user_prompt: questionText,
         event_name: 'user_question',
-        // Empty response for a question
-        response: JSON.stringify({
-            answer_for_chat: `<div class="user-question">Thinking...</div>`,
-            status: 'Pending'
-        })
+        // Set response to null to trigger skeleton loading state
+        response: null
     };
     
     // Add the user's question to the chat immediately

@@ -10,10 +10,7 @@
                             <QuestionAnswerCard 
                                 :chat="item" 
                                 :uuid="item.id || index" 
-                                @remove="handleQandARemove" 
-                                @typing="handleTyping"
-                                @typing-progress="handleTypingProgress"
-                                typingSpeedPreset="medium"/>
+                                @remove="handleQandARemove"/>
                         </div>
                     </div>
                     <div v-else class="mb-3">
@@ -44,7 +41,7 @@
     </div>
 </template>
 <script setup>
-import { ref, onMounted, watch, nextTick, computed, onUnmounted } from 'vue'
+import { ref, onMounted, nextTick, computed, onUnmounted } from 'vue'
 import QuestionAnswerCard from './QuestionAnswerCard.vue'
 import { CommunicationEnum } from '../composables/utils.js'
 import ScrollPanel from 'primevue/scrollpanel'
@@ -54,8 +51,6 @@ const question = ref('')
 const processing_question = ref(false)
 const ask_question_input = ref(null)
 const scrollPanel = ref(null)
-const isActiveTyping = ref(false)
-const typingScrollInterval = ref(null)
 
 // Define the props - now accepting chat instead of doc
 const props = defineProps({
@@ -84,70 +79,6 @@ onMounted(() => {
         }, 100);
     });
 })
-
-// Handle typing events from QuestionAnswerCard components
-const handleTyping = (isTyping) => {
-    isActiveTyping.value = isTyping;
-    
-    // If typing has started, set up continuous scrolling
-    if (isTyping) {
-        // Clear any existing interval
-        if (typingScrollInterval.value) {
-            clearInterval(typingScrollInterval.value);
-        }
-        
-        // Set up a new interval to scroll periodically during typing
-        typingScrollInterval.value = setInterval(() => {
-            if (isActiveTyping.value) {
-                scrollToBottom(false); // Use auto scrolling during typing for better performance
-            }
-        }, 200); // Adjust frequency as needed
-    } else {
-        // If typing has stopped, clear the interval and do a final scroll
-        if (typingScrollInterval.value) {
-            clearInterval(typingScrollInterval.value);
-            typingScrollInterval.value = null;
-        }
-        
-        // Final scroll when typing is complete, with a small delay to ensure content is fully rendered
-        setTimeout(() => {
-            scrollToBottom(true);
-            
-            // Additional scroll after a longer delay to ensure stability
-            setTimeout(() => {
-                // Final auto scroll to ensure we're at the bottom
-                scrollToBottom(false);
-                
-                // Release scroll control to the user
-                const scrollPanel = document.querySelector('.p-scrollpanel-wrapper');
-                if (scrollPanel) {
-                    scrollPanel.style.pointerEvents = 'auto';
-                }
-            }, 350);
-        }, 50);
-    }
-}
-
-// Handle typing progress events for more precise scrolling
-const handleTypingProgress = (progress) => {
-    // Scroll on significant progress 
-    if (progress.progress > 0.2 && !progress.isComplete) {
-        scrollToBottom(false); // Use auto scrolling during typing for better performance
-    }
-    
-    // Final smooth scroll when complete
-    if (progress.isComplete) {
-        scrollToBottom(true);
-        
-        // Release scroll control after a delay
-        setTimeout(() => {
-            const scrollPanel = document.querySelector('.p-scrollpanel-wrapper');
-            if (scrollPanel) {
-                scrollPanel.style.pointerEvents = 'auto';
-            }
-        }, 300);
-    }
-}
 
 const handleQandARemove = (uuid) => {
     //call backend to remove the QandA and only then remove it from the UI
@@ -247,14 +178,6 @@ const scrollToBottom = (smooth = true) => {
     }
 }
 
-// Clean up the interval when the component is unmounted
-onUnmounted(() => {
-    if (typingScrollInterval.value) {
-        clearInterval(typingScrollInterval.value);
-        typingScrollInterval.value = null;
-    }
-});
-
 const handleAsk = () => {
     if (!question.value.trim()) return;
     
@@ -279,7 +202,7 @@ const handleAsk = () => {
         id: tempId,
         created_at: new Date().toISOString(),
         user_prompt: question.value,
-        response: null
+        response: null // This will trigger the skeleton loading state
     };
     
     // Add temporary message to chat

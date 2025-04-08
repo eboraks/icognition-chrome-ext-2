@@ -12,26 +12,32 @@
         
         <!-- AI Response -->
         <div class="flex align-items-start">
-            <Avatar image="./icons/icog_action_icon_32x32.png" class="mr-2" />
-            <div class="surface-card border-round px-3 py-2 shadow-1 max-w-25 relative">
-                <div v-if="chat?.response == null" class="flex align-items-center">
-                    <i class="pi pi-spin pi-spinner mr-2"></i>
-                    <span>Thinking...</span>
+            <Avatar image="/icons/icog_action_icon_16x16.png" 
+                   class="mr-2" 
+                   :pt="{
+                       root: { class: 'custom-avatar' }
+                   }" 
+                   size="small" 
+                   shape="circle" />
+            <div class="surface-card border-round px-3 py-2 shadow-1 max-w-25 relative fadein animation-duration-500">
+                <div v-if="!chat?.response" class="skeleton-container">
+                    <div class="skeleton-content">
+                        <Skeleton width="100%" height="1.5rem" class="mb-3" />
+                        <Skeleton width="90%" height="1.5rem" class="mb-3" />
+                        <Skeleton width="95%" height="1.5rem" />
+                    </div>
                 </div>
                 <div v-else>
-                    <!-- Add typing effect for HTML content with dynamic cursor class -->
+                    <!-- Display response immediately without typing effect -->
                     <p v-if="is_answer_include_html" 
-                       class="m-0 cursor-pointer typing-effect" 
-                       :class="{ 'is-typing': isTyping }"
-                       v-html="displayedText" 
+                       class="m-0 cursor-pointer" 
+                       v-html="formattedResponse" 
                        @click="handleCitationClick"></p>
                     
-                    <!-- Add typing effect for plain text with dynamic cursor class -->
                     <p v-else 
-                       class="m-0 cursor-pointer typing-effect"
-                       :class="{ 'is-typing': isTyping }"
+                       class="m-0 cursor-pointer"
                        @click="handleCitationClick">
-                        {{displayedText}}
+                        {{formattedResponse}}
                         <i v-if="showError" class="pi pi-exclamation-circle text-red-500 ml-2" 
                            title="Citation not found in page"></i>
                     </p>
@@ -46,39 +52,14 @@
 
 <script setup lang="js">
     import moment from 'moment';
-    import { computed, nextTick, ref, onMounted, watch } from 'vue';
+    import { computed, ref } from 'vue';
     import Avatar from 'primevue/avatar';
+    import Skeleton from 'primevue/skeleton';
 
     const props = defineProps({ 
         chat: { type: Object, required: true }, 
-        uuid: { type: String, required: true },
-        // Add typing speed props with default values
-        typingSpeedPreset: { type: String, default: 'medium' }, // 'slow', 'medium', 'fast', 'instant'
-        customTypingSpeed: { type: Number, default: null } // Allow custom milliseconds per character
+        uuid: { type: String, required: true }
     });
-    
-    // Ref for the typing effect
-    const displayedText = ref('');
-    const isTyping = ref(false);
-    
-    // Calculate typing speed based on preset or custom value
-    const typingSpeed = computed(() => {
-        // If custom speed is provided, use it
-        if (props.customTypingSpeed !== null && props.customTypingSpeed >= 0) {
-            return props.customTypingSpeed;
-        }
-        
-        // Otherwise use presets
-        switch (props.typingSpeedPreset) {
-            case 'slow': return 80; // Slower typing - 80ms per character
-            case 'fast': return 15; // Faster typing - 15ms per character
-            case 'instant': return 1; // Almost instant - 1ms per character
-            case 'medium':
-            default: return 30; // Default medium speed - 30ms per character
-        }
-    });
-    
-    const typingTimeout = ref(null);
     
     // Computed function to format the response based on the new format
     const formattedResponse = computed(() => {
@@ -148,143 +129,8 @@
         
         return htmlRegex.test(formattedResponse.value); 
     });
-    
-    // Function to implement typing effect
-    const typeText = (text, index = 0) => {
-        isTyping.value = true;
-        
-        // Emit an event to trigger scroll in parent components
-        emit('typing', true);
-        
-        // Skip typing animation if preset is "instant"
-        if (props.typingSpeedPreset === 'instant') {
-            displayedText.value = text;
-            isTyping.value = false;
-            emit('typing', false);
-            emit('typing-progress', { progress: 1, isComplete: true });
-            return;
-        }
-        
-        // For HTML content, we need to handle tags differently
-        if (is_answer_include_html.value) {
-            // If HTML, we don't want to split tags, so we'll use a simpler approach
-            // that shows the whole response gradually
-            const fullLength = text.length;
-            
-            // Adjust chunk size based on typing speed for smoother animation
-            const chunkSize = typingSpeed.value < 20 ? 10 : 5; // Larger chunks for fast speeds
-            const charsToShow = Math.min(index + chunkSize, fullLength);
-            
-            displayedText.value = text.substring(0, charsToShow);
-            
-            // Trigger scroll to follow typing
-            emit('typing-progress', {
-                progress: charsToShow / fullLength,
-                isComplete: charsToShow >= fullLength
-            });
-            
-            if (charsToShow < fullLength) {
-                // Continue typing
-                typingTimeout.value = setTimeout(() => {
-                    typeText(text, charsToShow);
-                }, typingSpeed.value / 3); // HTML is shown in chunks, so use faster timing
-            } else {
-                // Done typing
-                isTyping.value = false;
-                emit('typing', false);
-                emit('typing-progress', { progress: 1, isComplete: true });
-                
-                // Ensure a final scroll update happens after typing is complete
-                setTimeout(() => {
-                    emit('typing-progress', { progress: 1, isComplete: true, final: true });
-                }, 100);
-            }
-        } else {
-            // For plain text, we can show character by character
-            if (index < text.length) {
-                displayedText.value = text.substring(0, index + 1);
-                
-                // Trigger scroll to follow typing
-                emit('typing-progress', {
-                    progress: index / text.length,
-                    isComplete: index >= text.length - 1
-                });
-                
-                typingTimeout.value = setTimeout(() => {
-                    typeText(text, index + 1);
-                }, typingSpeed.value);
-            } else {
-                isTyping.value = false;
-                emit('typing', false);
-                emit('typing-progress', { progress: 1, isComplete: true });
-                
-                // Ensure a final scroll update happens after typing is complete
-                setTimeout(() => {
-                    emit('typing-progress', { progress: 1, isComplete: true, final: true });
-                }, 100);
-            }
-        }
-    };
-    
-    // Function to stop typing and display full text immediately
-    const completeTyping = () => {
-        if (isTyping.value && typingTimeout.value) {
-            clearTimeout(typingTimeout.value);
-            displayedText.value = formattedResponse.value;
-            isTyping.value = false;
-            emit('typing', false);
-            emit('typing-progress', { progress: 1, isComplete: true });
-            
-            // Ensure a final scroll update happens after typing is complete
-            setTimeout(() => {
-                emit('typing-progress', { progress: 1, isComplete: true, final: true });
-            }, 100);
-        }
-    };
-    
-    // Watch for changes in the formatted response
-    watch(() => formattedResponse.value, (newVal, oldVal) => {
-        if (newVal && newVal !== oldVal) {
-            // Clear any existing typing timeouts
-            if (typingTimeout.value) {
-                clearTimeout(typingTimeout.value);
-            }
-            
-            // Reset displayed text and start typing
-            displayedText.value = '';
-            typeText(newVal);
-        }
-    }, { immediate: true });
-    
-    // Watch for changes in typing speed settings
-    watch(() => [props.typingSpeedPreset, props.customTypingSpeed], () => {
-        // If text is currently being typed, reset and restart with new speed
-        if (isTyping.value && formattedResponse.value) {
-            if (typingTimeout.value) {
-                clearTimeout(typingTimeout.value);
-            }
-            
-            // For instant mode, just show the full text
-            if (props.typingSpeedPreset === 'instant') {
-                displayedText.value = formattedResponse.value;
-                isTyping.value = false;
-                return;
-            }
-            
-            // Otherwise restart typing with current progress
-            const currentProgress = displayedText.value.length;
-            typeText(formattedResponse.value, currentProgress);
-        }
-    });
-    
-    // Start typing effect when component is mounted
-    onMounted(() => {
-        if (formattedResponse.value) {
-            typeText(formattedResponse.value);
-        }
-    });
 
-    const emit = defineEmits(['remove', 'typing', 'typing-progress']);
+    const emit = defineEmits(['remove']);
     const handleQandARemove = (uuid) => {
         //call backend to remove the QandA and only then remove it from the UI
         console.log('Card -> Removing QandA:', uuid);
@@ -295,9 +141,6 @@
     const showError = ref(false);
 
     const handleCitationClick = async () => {
-        // If typing is in progress, complete it immediately
-        completeTyping();
-        
         try {
             // Show loading state
             showError.value = false;
@@ -487,28 +330,79 @@ div[icon="pi pi-times"]:hover {
     cursor: pointer;
 }
 
-/* Add typing effect styles */
-.typing-effect {
-    position: relative;
-    min-height: 1.4rem;
+/* Update skeleton loading styles */
+.skeleton-container {
+    width: 100%;
+    min-height: 120px;
+    padding: 1rem 0;
 }
 
-/* Add blinking cursor effect - only visible during typing */
-.typing-effect::after {
-    content: '|';
-    display: inline;
-    opacity: 0;
-    animation: none; /* Default is no animation */
+.skeleton-content {
+    width: 100%;
+    min-width: 300px;
 }
 
-/* Only show blinking cursor when actively typing */
-.typing-effect.is-typing::after {
-    animation: blink 1s infinite;
-    opacity: 1;
+:deep(.p-skeleton) {
+    background-color: var(--surface-200);
+    border-radius: 4px;
+    margin-bottom: 0.75rem;
+    min-width: 250px;
 }
 
-@keyframes blink {
-    0%, 100% { opacity: 0; }
-    50% { opacity: 1; }
+:deep(.p-skeleton::after) {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    transform: translateX(-100%);
+    background-image: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0) 0,
+        rgba(255, 255, 255, 0.2) 20%,
+        rgba(255, 255, 255, 0.5) 60%,
+        rgba(255, 255, 255, 0)
+    );
+    animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+    100% {
+        transform: translateX(100%);
+    }
+}
+
+/* Add animation styles */
+.fadein {
+    animation: fadein 0.5s ease-in-out;
+}
+
+@keyframes fadein {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Add Avatar custom styles */
+:deep(.custom-avatar) {
+    width: 20px !important;
+    height: 20px !important;
+    background-color: #f8f9fa;
+    border: none;
+    padding: 2px;
+}
+
+:deep(.custom-avatar img) {
+    width: 16px !important;
+    height: 16px !important;
+    object-fit: contain !important;
+    margin: 0 !important;
+    padding: 0 !important;
 }
 </style>
