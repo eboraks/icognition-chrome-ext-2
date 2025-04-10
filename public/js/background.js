@@ -49,6 +49,39 @@ let maxReconnectAttempts = 10;
 let reconnectTimeout = null;
 let heartbeatInterval = null;
 
+// Global variable to store logged shortcuts
+let recentShortcuts = [];
+const MAX_SHORTCUTS = 20; // Maximum number of shortcuts to store
+
+// Function to log commands from the commands API
+function logCommand(command) {
+    const shortcutInfo = {
+        type: 'chrome.command',
+        command: command,
+        timestamp: new Date().toISOString()
+    };
+    
+    console.log('Command Shortcut Detected:', shortcutInfo);
+    
+    // Add to recent shortcuts
+    recentShortcuts.unshift(shortcutInfo);
+    if (recentShortcuts.length > MAX_SHORTCUTS) {
+        recentShortcuts.pop();
+    }
+    
+    // Notify any open side panels
+    try {
+        chrome.runtime.sendMessage({
+            name: 'shortcut-logged',
+            shortcut: shortcutInfo
+        }).catch(err => {
+            // Ignore errors - side panel might not be open
+        });
+    } catch (e) {
+        // Ignore errors - side panel might not be open
+    }
+}
+
 const registerWebSocketConnection = async () => {
     // Prevent multiple simultaneous connection attempts
     if (isConnecting) {
@@ -449,9 +482,21 @@ function refreshBookmarksCache(user_uid) {
 
     fetch_retry(url, options, attempts).then(async (bookmarks) => {
         console.log('refreshBookmarksCache -> response: ', bookmarks)
+        
+        // Log size information
+        const bookmarksSize = JSON.stringify(bookmarks).length;
+        console.log('Bookmarks array size:', bookmarks.length, 'items');
+        console.log('Total JSON string size:', bookmarksSize, 'bytes');
+        console.log('Average size per bookmark:', Math.round(bookmarksSize / bookmarks.length), 'bytes');
+        
+        // Log first few bookmarks to check their structure
+        console.log('Sample bookmarks:', bookmarks.slice(0, 3));
 
-        //Clear the local storage before storing the bookmarks
+        // First clear the storage
         await chrome.storage.local.clear()
+        console.log('Storage cleared successfully')
+        
+        // Then store the new bookmarks
         storeBookmarks(bookmarks)
     }).catch((error) => {
         console.log('refreshBookmarksCache -> error: ', error)
@@ -666,13 +711,21 @@ async function sendDocumentToSidePanel(document) {
 
  
 function storeBookmarks(new_bookmarks) { 
-    
     if (!Array.isArray(new_bookmarks)) new_bookmarks = [new_bookmarks]
     
-    // Clean URLs in new bookmarks before storing
+    // Clean URLs and only store essential data
     new_bookmarks = new_bookmarks.map(bookmark => {
         if (bookmark && bookmark.url) {
-            return { ...bookmark, url: cleanUrl(bookmark.url) };
+            // Only store essential fields
+            return {
+                id: bookmark.id,
+                url: cleanUrl(bookmark.url),
+                title: bookmark.title,
+                update_at: bookmark.update_at,
+                user_id: bookmark.user_id,
+                filename: bookmark.filename,
+                document_id: bookmark.document_id
+            };
         }
         return bookmark;
     });
@@ -682,7 +735,15 @@ function storeBookmarks(new_bookmarks) {
         // Clean URLs in existing bookmarks if needed
         bkmks = bkmks.map(bookmark => {
             if (bookmark && bookmark.url) {
-                return { ...bookmark, url: cleanUrl(bookmark.url) };
+                return {
+                    id: bookmark.id,
+                    url: cleanUrl(bookmark.url),
+                    title: bookmark.title,
+                    update_at: bookmark.update_at,
+                    user_id: bookmark.user_id,
+                    filename: bookmark.filename,
+                    document_id: bookmark.document_id
+                };
             }
             return bookmark;
         });
@@ -1042,5 +1103,139 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
         return true;
     }
+    // ... rest of existing message handlers ...
+});
+
+// Enhance the existing commands listener or add it if not present
+chrome.commands.onCommand.addListener((command) => {
+    console.log('Command received:', command);
+    
+    // Log the command first
+    logCommand(command);
+    
+    // Then handle specific commands as before
+    if (command === 'toggle-side-panel') {
+        // ... existing code ...
+    }
+    else if (command === 'focus-input') {
+        console.log('Focus input command received');
+        let needsToOpenPanel = false;
+        
+        // First check if the panel is already open
+        try {
+            // Try to send a message to check if panel is open
+            chrome.runtime.sendMessage({ 
+                name: 'panel-status-check'
+            }).then(response => {
+                console.log('Panel is already open, focusing directly');
+                sendFocusMessage();
+            }).catch(error => {
+                console.log('Panel not open yet, opening first: ', error);
+                openPanelThenFocus();
+            });
+        } catch (error) {
+            console.log('Error checking panel status, assuming not open: ', error);
+            openPanelThenFocus();
+        }
+    }
+    // ... any other command handlers ...
+});
+
+// Helper function to send the focus message with "fresh-open" context
+function sendFocusMessage() {
+    chrome.runtime.sendMessage({ 
+        name: 'focus-input',
+        data: { 
+            action: 'focus-input',
+            context: 'auto',
+            freshOpen: false  // Panel was already open
+        }
+    }).catch(err => {
+        console.log('Error sending focus message: ', err);
+    });
+}
+
+// Helper function to open the panel then focus
+function openPanelThenFocus() {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs && tabs[0]) {
+            console.log('Opening side panel first');
+            
+            // Open the side panel with a parameter indicating it was opened via shortcut
+            chrome.sidePanel.open({ 
+                tabId: tabs[0].id,
+                // Add a parameter to indicate this was opened via keyboard shortcut
+                path: 'index.html?from_shortcut=true&sidepanel=true'
+            }).then(() => {
+                console.log('Side panel opened with from_shortcut param, waiting before focusing');
+                
+                // Use a longer delay to ensure panel is fully rendered
+                setTimeout(() => {
+                    chrome.runtime.sendMessage({ 
+                        name: 'focus-input',
+                        data: { 
+                            action: 'focus-input',
+                            context: 'auto',
+                            freshOpen: true  // Panel was just opened
+                        }
+                    }).catch(err => {
+                        console.log('Error sending focus message after panel open: ', err);
+                        
+                        // Try once more with an even longer delay
+                        setTimeout(() => {
+                            chrome.runtime.sendMessage({ 
+                                name: 'focus-input',
+                                data: { 
+                                    action: 'focus-input',
+                                    context: 'auto',
+                                    freshOpen: true,
+                                    finalAttempt: true
+                                }
+                            }).catch(finalErr => {
+                                console.log('Final focus attempt failed: ', finalErr);
+                            });
+                        }, 1000);
+                    });
+                }, 800); // Increased from 500ms to 800ms for better reliability
+            }).catch(err => {
+                console.log('Error opening side panel: ', err);
+            });
+        }
+    });
+}
+
+// Add a function to get all available commands with their shortcuts
+function getAllCommands() {
+    chrome.commands.getAll(commands => {
+        console.log('All registered commands:', commands);
+        
+        // Format and log each command
+        commands.forEach(cmd => {
+            console.log(`Command: ${cmd.name}, Shortcut: ${cmd.shortcut || 'none'}, Description: ${cmd.description}`);
+        });
+    });
+}
+
+// Call this when the background script starts
+getAllCommands();
+
+// Add message handler for fetching recent shortcuts
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    // ... existing message handlers ...
+    
+    // Add handler for fetching recent shortcuts
+    if (message.name === 'get-recent-shortcuts') {
+        sendResponse({ shortcuts: recentShortcuts });
+        return true;
+    }
+    
+    // Add handler for clearing shortcuts
+    if (message.name === 'clear-shortcuts') {
+        console.log('Clearing shortcuts history');
+        recentShortcuts = [];
+        sendResponse({ success: true });
+        return true;
+    }
+    
     // ... rest of existing message handlers ...
 });

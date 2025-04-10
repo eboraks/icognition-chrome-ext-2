@@ -1,49 +1,59 @@
 <template>
-    <div class="side-panel-container">        
-        <div class="header bg-primary-800 w-full h-20">
-            <div class="flex justify-content-between align-items-center">
-                <a :href="library_url" target="_blank">
+    <div class="side-panel-container" tabindex="-1">        
+        <div class="header bg-primary-800 w-full h-20" tabindex="-1">
+            <div class="flex justify-content-between align-items-center" tabindex="-1">
+                <a tabindex="6" :href="library_url" target="_blank">
                     <img src="/icons/iCognitionLogo.png" alt="iCognition Logo" width="150px" class="m-2"/>
                 </a>
-                <div class="pi pi-sign-out text-white mr-4 flex align-items-center" v-if="user" @click="handleSignOut"></div>
+                <div tabindex="5" class="pi pi-sign-out text-white mr-4 flex align-items-center" v-if="user" @click="handleSignOut"></div>
             </div>
         </div>
         
-        <div class="flex flex-column">
-            <div v-if="status.state === AppStatusEnum.INITIALIZING.state" class="m-2 p-2">
+        <div class="flex flex-column" tabindex="-1">
+            <div v-if="status.state === AppStatusEnum.INITIALIZING.state" class="m-2 p-2" tabindex="-1">
                 <ProgressBar mode="indeterminate"></ProgressBar>
                 <p>{{ statusMessage }}</p>
             </div>
             
-            <div v-if="status.state === AppStatusEnum.PROCESSING.state && progressPercent > 0 && progressPercent < 100" class="message_container flex align-items-center justify-content-center p-2 m-2">
-                <div class="w-full px-3">
+            <div v-if="status.state === AppStatusEnum.PROCESSING.state && progressPercent > 0 && progressPercent < 100" class="message_container flex align-items-center justify-content-center p-2 m-2" tabindex="-1">
+                <div class="w-full px-3" tabindex="-1">
                     <ProgressBar :value="progressPercent" class="mb-2"></ProgressBar>
                     <p class="text-center">{{ AppStatusEnum.PROCESSING.message }}</p>
                 </div>
             </div>
            
-            <div v-if="status.state === AppStatusEnum.UNAUTHENTICATED.state" class="button_container flex align-items-center justify-content-center m-2 p-2">
-                <GoogleLoginButton></GoogleLoginButton>
+            <div v-if="status.state === AppStatusEnum.UNAUTHENTICATED.state" class="button_container flex align-items-center justify-content-center m-2 p-2" tabindex="-1">
+                <GoogleLoginButton tabindex="4"></GoogleLoginButton>
             </div>
 
-            <div v-if="status.state === AppStatusEnum.SERVER_READY.state && (!chat_messages || chat_messages.length === 0)" class="flex flex-column align-items-center justify-content-center m-2 p-4">
-                <div v-if="isSearchingBookmark" class="flex flex-column align-items-center">
+            <div v-if="status.state === AppStatusEnum.SERVER_READY.state && (!chat_messages || chat_messages.length === 0)" class="flex flex-column align-items-center justify-content-center m-2 p-4" tabindex="-1">
+                <div v-if="isSearchingBookmark" class="flex flex-column align-items-center" tabindex="-1">
                     <ProgressSpinner style="width:50px;height:50px" strokeWidth="3" fill="var(--surface-ground)" animationDuration="2s"/>
                     <p class="text-center mt-2">Checking for existing analysis...</p>
                 </div>
-                <div v-else>
-                    <p class="text-center mb-2">No analysis found for this page</p>
-                    <Button @click="handleBookmark" label="Analyze This Page" icon="pi pi-search" class="p-button-primary"></Button>
+                <div v-else tabindex="-1">
+                <p class="text-center mb-2">No analysis found for this page</p>
+                    <Button @click="handleBookmark" 
+                           label="Analyze This Page" 
+                           icon="pi pi-search" 
+                           ref="analyzeButton"
+                           id="analyze-button"
+                           tabindex="3"
+                           :class="['p-button-primary', { 'button-has-focus': buttonHasFocus }]"
+                           @keydown.enter="handleBookmark"
+                           @keydown.space="handleBookmark"
+                           @focus="buttonHasFocus = true"
+                           @blur="buttonHasFocus = false"></Button>
                 </div>
             </div>
         </div>
 
         <!-- Chat interface container -->
-        <div v-if="chat_messages && chat_messages.length > 0" class="chat-interface-container">
-            <div class="page-info p-2 bg-primary-50">
-                <div class="flex align-items-center justify-content-between">
+        <div v-if="chat_messages && chat_messages.length > 0" class="chat-interface-container" tabindex="-1">
+            <div class="page-info p-2 bg-primary-50" tabindex="-1">
+                <div class="flex align-items-center justify-content-between" tabindex="-1">
                     <span class="text-sm text-primary-800">{{ getCurrentPageTitle() }}</span>
-                    <Button @click="clearCurrentChat" icon="pi pi-trash" class="p-button-text p-button-sm p-button-danger"></Button>
+                    <Button tabindex="2" @click="clearCurrentChat" icon="pi pi-trash" class="p-button-text p-button-sm p-button-danger"></Button>
                 </div>
             </div>
             <DocSummary 
@@ -54,10 +64,11 @@
         </div>
 
         <!-- Ask input section - always visible -->
-        <div id="ask" class="ask-input" v-if="status.state === AppStatusEnum.SERVER_READY.state || status.state === AppStatusEnum.DOCUMENT_READY.state">               
-            <div ref="ask_question_input" class="flex gap-2">
-                <div class="textarea-with-autocomplete flex-grow-1">
+        <div id="ask" class="ask-input" v-if="status.state === AppStatusEnum.SERVER_READY.state || status.state === AppStatusEnum.DOCUMENT_READY.state" tabindex="-1">               
+            <div ref="ask_question_input" class="flex gap-2" tabindex="-1">
+                <div class="textarea-with-autocomplete flex-grow-1" tabindex="-1">
                     <Textarea 
+                        tabindex="0"
                         v-model="selectedQuestion"
                         @keydown="handleKeydownInTextarea"
                         @input="handleTextareaInput"
@@ -78,11 +89,12 @@
                         v-show="showAutocomplete && filteredQuestions.length > 0" 
                         class="autocomplete-dropdown"
                         @mousedown.prevent
+                        tabindex="-1"
                     >
-                        <div class="debug-dropdown">
+                        <div class="debug-dropdown" tabindex="-1">
                             <span>Suggested questions ({{filteredQuestions.length}})</span>
                         </div>
-                        <ul class="autocomplete-list">
+                        <ul class="autocomplete-list" tabindex="-1">
                             <li 
                                 v-for="(question, index) in filteredQuestions" 
                                 :key="index"
@@ -90,6 +102,7 @@
                                 class="autocomplete-item"
                                 :class="{ 'autocomplete-item-active': index === activeIndex }"
                                 :data-index="index"
+                                tabindex="0"
                             >
                                 {{ question }}
                             </li>
@@ -98,7 +111,8 @@
                 </div>
                 <Button @click="handleAsk" 
                         icon="pi pi-send"
-                        class="p-button-rounded" />
+                        class="p-button-rounded"
+                        tabindex="0" />
             </div>
         </div>
 
@@ -111,13 +125,40 @@
             </Message>
         </div>
         
-        <div v-if="debug_mode" class="debug surface-ground p-2 border-top-1 border-primary-100">
+        <div tabindex="-1" v-if="debug_mode" class="debug surface-ground p-2 border-top-1 border-primary-100">
+            <span class="debug-toggle" @click="toggleDebugSize">{{ debugExpanded ? 'Collapse' : 'Expand' }}</span>
             <p class="text-sm text-600 mb-1">Status: {{ status.state }}</p>
             <p class="text-sm text-600 mb-1">Status Message: {{ statusMessage }}</p>
             <p class="text-sm text-600 mb-1">Document ID: {{ doc?.id }}</p>
             <p class="text-sm text-600 mb-1">Document ID (URL Cache): {{ active_tab?.url ? documentIdsByUrl[cleanUrl(active_tab.url)] : 'No active tab' }}</p>
             <p class="text-sm text-600 mb-1">User: {{ user?.uid }}</p>
             <p class="text-sm text-600">Progress Percent: {{ progressPercent }}</p>
+            <p class="text-sm text-600 mt-2 font-bold">
+                <span class="mr-2">Keyboard Logger:</span>
+                <Button @click="toggleKeyboardLogger" 
+                        :class="keyboardLoggerActive ? 'p-button-success' : 'p-button-secondary'" 
+                        :label="keyboardLoggerActive ? 'Active' : 'Inactive'" 
+                        size="small" />
+                <span v-if="lastKeyboardShortcut" class="ml-3">Last: <span class="text-primary-600 font-bold">{{ lastKeyboardShortcut }}</span></span>
+                <Button @click="fetchGlobalShortcuts" 
+                        class="p-button-text p-button-sm ml-2"
+                        icon="pi pi-sync" />
+                <Button @click="clearShortcuts" 
+                        class="p-button-text p-button-sm p-button-danger ml-1"
+                        icon="pi pi-trash" 
+                        title="Clear shortcut history"/>
+            </p>
+            
+            <!-- Enhanced Global shortcuts section -->
+            <div v-if="globalShortcuts.length > 0" class="global-shortcuts-section">
+                <p class="text-sm text-600 font-bold p-2">Global Shortcuts Detected: ({{ globalShortcuts.length }})</p>
+                <ul class="m-0 p-0 text-sm">
+                    <li v-for="(shortcut, index) in globalShortcuts" :key="index" class="shortcut-item">
+                        <span class="shortcut-command">{{ shortcut.command }}</span>
+                        <span class="shortcut-time">{{ formatTimestamp(shortcut.timestamp) }}</span>
+                    </li>
+                </ul>
+            </div>
         </div>
     </div>
 </template>
@@ -179,7 +220,7 @@ const bookmarks = ref([])
 const active_tab = ref(null)
 const doc = ref(null)
 const chat_messages = ref(null)
-const debug_mode = ref(true) // TODO: Remove this before production
+const debug_mode = ref(false) // TODO: Remove this before production
 const library_url = ref(import.meta.env.VITE_ICOGNITION_APP_URL || 'https://app.icognition.ai')
 const progressPercent = ref(5)
 const user = ref(null)
@@ -202,8 +243,22 @@ const questionTextarea = ref(null);
 
 // Add this ref to track search state
 const isSearchingBookmark = ref(false);
+const analyzeButton = ref(null);
 
-onMounted(async () => {
+// Add refs for keyboard logger
+const keyboardLoggerActive = ref(true);
+const lastKeyboardShortcut = ref('');
+
+// Add ref for global shortcuts
+const globalShortcuts = ref([]);
+
+// Add ref for debug panel expansion
+const debugExpanded = ref(true); // Default to expanded for better visibility
+
+// Add ref for button focus state
+const buttonHasFocus = ref(false);
+
+onMounted(() => {
     console.log('SidePanel component mounted');
     
     // Establish connection with background script to indicate side panel is open
@@ -260,12 +315,61 @@ onMounted(async () => {
 
     // Add event listener for keyboard navigation
     document.addEventListener('keydown', handleKeyDown);
+
+    // Add keyboard shortcut logger
+    document.addEventListener('keydown', logKeyboardShortcut);
+
+    // Add listener for global shortcuts coming from background
+    chrome.runtime.onMessage.addListener((request) => {
+        if (request.name === 'shortcut-logged' && request.shortcut) {
+            if (globalShortcuts.value.length >= 20) {
+                globalShortcuts.value.pop();
+            }
+            globalShortcuts.value.unshift(request.shortcut);
+        }
+    });
+    
+    // Fetch any existing shortcuts
+    fetchGlobalShortcuts();
+
+    // After the panel is fully mounted, run a one-time initialization
+    nextTick(() => {
+        // Wait for any potential UI rendering to complete
+        setTimeout(() => {
+            // Check for URL parameters to see if this was opened via keyboard shortcut
+            const url = new URL(window.location.href);
+            const fromShortcut = url.searchParams.get('from_shortcut');
+            
+            if (fromShortcut === 'true') {
+                console.log('Panel was opened via keyboard shortcut, checking focus targets');
+                
+                // Wait a bit longer for all elements to fully initialize
+                setTimeout(() => {
+                    if (status.value.state === AppStatusEnum.SERVER_READY.state && 
+                        (!chat_messages.value || chat_messages.value.length === 0) &&
+                        !isSearchingBookmark.value) {
+                        
+                        console.log('Auto-focusing analyze button on initial mount');
+                        focusAnalyzeButton();
+                    } else if (chat_messages.value && chat_messages.value.length > 0) {
+                        console.log('Auto-focusing question input on initial mount');
+                        focusQuestionInput();
+                    }
+                }, 500);
+            }
+        }, 100);
+    });
 });
 
 onUnmounted(() => {
     document.removeEventListener('keydown', handleKeyDown);
+    // Remove keyboard shortcut logger when component unmounts
+    document.removeEventListener('keydown', logKeyboardShortcut);
+    // Remove the chat scroll keyboard listener when component unmounts
+    // document.removeEventListener('keydown', handleScrollKeyEvents);
 });
 
+// Add the handleTabChange function
 const handleTabChange = (tab) => {
     // Prevent duplicate processing if the URL hasn't changed
     if (active_tab.value?.url === tab.url) {
@@ -336,7 +440,7 @@ const handleTabChange = (tab) => {
     }
     
     console.log('Final status after tab change:', status.value.state);
-}
+};
 
 watch(user, (after, before) => {
     if (after) {
@@ -377,22 +481,22 @@ const searchBookmarksByUrl = async (url) => {
     
     try {
         // Check if we already have a chat for this URL in memory
-        if (chatsByUrl.value[cleanedUrl] && chatsByUrl.value[cleanedUrl].length > 0) {
-            console.log('Found chat in memory for URL:', cleanedUrl);
-            chat_messages.value = chatsByUrl.value[cleanedUrl];
-            bookmark.value = bookmarksByUrl.value[cleanedUrl] || null;
-            status.value = AppStatusEnum.DOCUMENT_READY;
-            console.log('Setting status to DOCUMENT_READY (found chat in memory)');
-            return;
-        }
+    if (chatsByUrl.value[cleanedUrl] && chatsByUrl.value[cleanedUrl].length > 0) {
+        console.log('Found chat in memory for URL:', cleanedUrl);
+        chat_messages.value = chatsByUrl.value[cleanedUrl];
+        bookmark.value = bookmarksByUrl.value[cleanedUrl] || null;
+        status.value = AppStatusEnum.DOCUMENT_READY;
+        console.log('Setting status to DOCUMENT_READY (found chat in memory)');
+        return;
+    }
 
         // Check local storage first
-        const value = await chrome.storage.local.get(["bookmarks"]);
-        console.log('Got bookmarks from storage:', value.bookmarks ? value.bookmarks.length : 0);
+    const value = await chrome.storage.local.get(["bookmarks"]);
+    console.log('Got bookmarks from storage:', value.bookmarks ? value.bookmarks.length : 0);
 
-        if (value.bookmarks) {
-            value.bookmarks = value.bookmarks.filter(bookmark => bookmark != null && bookmark !== undefined);
-            console.log('Filtered bookmarks count:', value.bookmarks.length);
+    if (value.bookmarks) {
+        value.bookmarks = value.bookmarks.filter(bookmark => bookmark != null && bookmark !== undefined);
+        console.log('Filtered bookmarks count:', value.bookmarks.length);
             
             const found = value.bookmarks.find(bookmark => bookmark.url === cleanedUrl);
             if (found) {
@@ -405,14 +509,14 @@ const searchBookmarksByUrl = async (url) => {
                 }
                 return;
             }
-        }
+            }
 
         // If we reach here, no bookmark was found locally
         console.log('No bookmarks found in local storage, setting SERVER_READY status');
         status.value = AppStatusEnum.SERVER_READY;
 
-    } catch (error) {
-        console.error('Error searching bookmarks by URL:', error);
+        } catch (error) {
+            console.error('Error searching bookmarks by URL:', error);
         handleError('Error searching bookmarks');
         status.value = AppStatusEnum.SERVER_READY;
     } finally {
@@ -424,7 +528,96 @@ const searchBookmarksByUrl = async (url) => {
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    console.log('onMessage:', request.name)
+    console.log('onMessage:', request.name, request.data || '');
+    
+    // Add a handler for panel status check
+    if (request.name === 'panel-status-check') {
+        console.log('Received panel status check - panel is open');
+        sendResponse({ open: true });
+        return true;
+    }
+    
+    // Handle focus-input message with context awareness
+    if (request.name === 'focus-input') {
+        console.log('Received focus-input message:', request.data);
+        
+        // Check if this is a fresh panel open
+        const isFreshOpen = request.data?.freshOpen || false;
+        const isFinalAttempt = request.data?.finalAttempt || false;
+        
+        // If it's a fresh open or final attempt, use a longer delay
+        const focusDelay = isFreshOpen ? (isFinalAttempt ? 1000 : 300) : 100;
+        
+        console.log(`Using focus delay of ${focusDelay}ms (freshOpen: ${isFreshOpen}, finalAttempt: ${isFinalAttempt})`);
+        
+        // Use setTimeout with appropriate delay
+        setTimeout(() => {
+            // Decide what to focus based on the current state
+            const context = request.data?.context || 'auto';
+            
+            // Log more detailed diagnostic info
+            console.log('Focus request details:', {
+                chatExists: chat_messages.value && chat_messages.value.length > 0,
+                appState: status.value.state,
+                analyzeButtonAvailable: !!analyzeButton.value,
+                searchingBookmark: isSearchingBookmark.value,
+                freshPanelOpen: isFreshOpen
+            });
+            
+            // If chat exists, focus the input field
+            if (chat_messages.value && chat_messages.value.length > 0) {
+                focusQuestionInput();
+            } 
+            // If no chat but "Analyze This Page" button is visible, focus that
+            else if (status.value.state === AppStatusEnum.SERVER_READY.state && 
+                     (!chat_messages.value || chat_messages.value.length === 0) &&
+                     !isSearchingBookmark.value) {
+                
+                // Check if the analyze button is in the DOM and try to focus it
+                if (analyzeButton.value) {
+                    console.log('Analyze button found, focusing it');
+                    focusAnalyzeButton();
+                } else {
+                    console.log('Analyze button not found in refs, trying querySelector');
+                    
+                    // Fallback to using querySelector if the ref isn't working
+                    const btnEl = document.querySelector('button.p-button-primary');
+                    if (btnEl) {
+                        console.log('Found button via querySelector, focusing it');
+                        btnEl.focus();
+                        btnEl.classList.add('button-focus-highlight');
+                        setTimeout(() => {
+                            btnEl.classList.remove('button-focus-highlight');
+                        }, 2000);
+                    } else {
+                        console.error('Could not find analyze button via querySelector');
+                    }
+                }
+            }
+            // Otherwise, try to focus the input anyway
+            else {
+                console.log('No valid focus target found, trying question input as fallback');
+                focusQuestionInput();
+            }
+            
+            // Send response back to indicate success
+            if (sendResponse) {
+                try {
+                    sendResponse({ 
+                        success: true, 
+                        activeElement: document.activeElement?.tagName,
+                        activeElementId: document.activeElement?.id,
+                        activeElementClass: document.activeElement?.className,
+                        appState: status.value.state
+                    });
+                } catch (e) {
+                    console.error('Error sending response:', e);
+                }
+            }
+        }, focusDelay);
+        
+        return true; // Keep the message channel open for the async response
+    }
     
     if (request.name === CommunicationEnum.NEW_DOC) {
         doc.value = request.data
@@ -505,19 +698,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     !msg.id || (typeof msg.id === 'string' && !msg.id.startsWith(tempId))
                 );
             }
-            
-            // Add the new chat message to the existing messages
-            if (chat_messages.value) {
-                chat_messages.value.push(newChatMessage);
-            } else {
-                chat_messages.value = [newChatMessage];
-            }
-            
-            // Save updated chat for current URL
-            if (active_tab.value && active_tab.value.url) {
-                chatsByUrl.value[cleanUrl(active_tab.value.url)] = [...chat_messages.value];
-            }
-            
+        
+        // Add the new chat message to the existing messages
+        if (chat_messages.value) {
+            chat_messages.value.push(newChatMessage);
+        } else {
+            chat_messages.value = [newChatMessage];
+        }
+        
+        // Save updated chat for current URL
+        if (active_tab.value && active_tab.value.url) {
+            chatsByUrl.value[cleanUrl(active_tab.value.url)] = [...chat_messages.value];
+        }
+        
             // Set status to DOCUMENT_READY if not already
             status.value = AppStatusEnum.DOCUMENT_READY;
             
@@ -689,9 +882,9 @@ const fetchChat = async (document_id) => {
     
     try {
         const chatResponse = await new Promise((resolve, reject) => {
-            chrome.runtime.sendMessage({ 
-                name: CommunicationEnum.FETCH_CHAT, 
-                document_id: document_id 
+    chrome.runtime.sendMessage({ 
+        name: CommunicationEnum.FETCH_CHAT, 
+        document_id: document_id 
             }, (response) => {
                 if (chrome.runtime.lastError) {
                     reject(chrome.runtime.lastError);
@@ -777,15 +970,15 @@ const clearCurrentChat = async () => {
                 });
                 
                 if (response.success) {
-                    // Clear chat for current URL
-                    delete chatsByUrl.value[currentUrl];
-                    delete bookmarksByUrl.value[currentUrl];
-                    delete documentIdsByUrl.value[currentUrl];
-                    
-                    // Reset current state
-                    chat_messages.value = null;
-                    bookmark.value = null;
-                    doc.value = null;
+        // Clear chat for current URL
+        delete chatsByUrl.value[currentUrl];
+        delete bookmarksByUrl.value[currentUrl];
+        delete documentIdsByUrl.value[currentUrl];
+        
+        // Reset current state
+        chat_messages.value = null;
+        bookmark.value = null;
+        doc.value = null;
                     status.value = AppStatusEnum.SERVER_READY;
                     
                     // Send message to background script to update badge
@@ -1275,6 +1468,237 @@ const handleAsk = () => {
         addErrorMessageToChat('Error submitting your question. Please try again.');
     });
 }
+
+// Add this function for the keyboard logger
+const toggleKeyboardLogger = () => {
+    keyboardLoggerActive.value = !keyboardLoggerActive.value;
+    console.log(`Keyboard shortcut logger ${keyboardLoggerActive.value ? 'enabled' : 'disabled'}`);
+};
+
+// Function to log keyboard shortcuts
+const logKeyboardShortcut = (event) => {
+    // Skip if logger is inactive
+    if (!keyboardLoggerActive.value) return;
+    
+    // Don't log shortcuts in input fields
+    if (document.activeElement && (
+        document.activeElement.tagName === 'INPUT' || 
+        document.activeElement.tagName === 'TEXTAREA' || 
+        document.activeElement.isContentEditable
+    )) {
+        return;
+    }
+    
+    // Build shortcut string
+    let shortcut = '';
+    if (event.ctrlKey) shortcut += 'Ctrl+';
+    if (event.altKey) shortcut += 'Alt+';
+    if (event.shiftKey) shortcut += 'Shift+';
+    if (event.metaKey) shortcut += 'Meta+'; // Command key on Mac
+    
+    // Add the main key to the shortcut
+    const key = event.key === ' ' ? 'Space' : event.key;
+    shortcut += key;
+    
+    // Update the last shortcut for display
+    lastKeyboardShortcut.value = shortcut;
+    
+    // Only log if in debug mode
+    if (debug_mode.value) {
+        console.log('Keyboard Shortcut:', shortcut);
+        console.log('Key Details:', {
+            key: event.key,
+            code: event.code,
+            keyCode: event.keyCode,
+            ctrlKey: event.ctrlKey,
+            altKey: event.altKey,
+            shiftKey: event.shiftKey,
+            metaKey: event.metaKey,
+            handled: event.defaultPrevented,
+            timestamp: new Date().toISOString()
+        });
+    }
+};
+
+// Add a function to fetch global shortcuts from the background script
+const fetchGlobalShortcuts = () => {
+    chrome.runtime.sendMessage({ name: 'get-recent-shortcuts' }, (response) => {
+        if (response && response.shortcuts) {
+            globalShortcuts.value = response.shortcuts;
+            console.log('Received global shortcuts:', globalShortcuts.value);
+        }
+    });
+};
+
+// Add a function to format timestamps
+const formatTimestamp = (timestamp) => {
+    try {
+        const date = new Date(timestamp);
+        return date.toLocaleTimeString();
+    } catch (e) {
+        return timestamp;
+    }
+};
+
+// Add function to focus the analyze button
+const focusAnalyzeButton = () => {
+    console.log('Attempting to focus analyze button');
+    
+    // First try using the ref
+    if (analyzeButton.value && analyzeButton.value.$el) {
+        console.log('analyzeButton ref found:', analyzeButton.value);
+        
+        try {
+            // Set the focus state first 
+            buttonHasFocus.value = true;
+            
+            // Focus the button
+            analyzeButton.value.$el.focus({ preventScroll: false });
+            console.log('Focused analyze button via ref');
+            
+            // Add visual indicator
+            analyzeButton.value.$el.classList.add('button-focus-highlight');
+            
+            // Special trick to ensure focus is visually shown in all browsers
+            analyzeButton.value.$el.style.outline = '3px solid var(--primary-color)';
+            analyzeButton.value.$el.style.outlineOffset = '3px';
+            
+            setTimeout(() => {
+                if (analyzeButton.value && analyzeButton.value.$el) {
+                    analyzeButton.value.$el.classList.remove('button-focus-highlight');
+                    // Don't remove the outline - keep it visible as long as focus remains
+                }
+            }, 2000);
+            
+            console.log('After focus via ref, active element is:', document.activeElement);
+            
+            // Create an animation to draw attention to the button
+            createFocusAnimation();
+            
+            return true;
+        } catch (e) {
+            console.error('Error focusing analyze button via ref:', e);
+        }
+    } else {
+        console.error('analyzeButton ref is not defined or not rendered');
+    }
+    
+    // Fallback to using querySelector if the ref doesn't work
+    try {
+        const btnEl = document.querySelector('#analyze-button');
+        if (btnEl) {
+            console.log('Found button via querySelector, focusing it');
+            
+            // Set the focus state
+            buttonHasFocus.value = true;
+            
+            btnEl.focus({ preventScroll: false });
+            btnEl.classList.add('button-focus-highlight');
+            
+            // Special trick to ensure focus is visually shown
+            btnEl.style.outline = '3px solid var(--primary-color)';
+            btnEl.style.outlineOffset = '3px';
+            
+            setTimeout(() => {
+                btnEl.classList.remove('button-focus-highlight');
+                // Don't remove the outline
+            }, 2000);
+            
+            console.log('After focus via querySelector, active element is:', document.activeElement);
+            
+            // Create an animation to draw attention to the button
+            createFocusAnimation();
+            
+            return true;
+        }
+    } catch (e) {
+        console.error('Error focusing button via querySelector:', e);
+    }
+    
+    console.error('Could not focus analyze button via any method');
+    return false;
+};
+
+// Add a function to create a focus animation overlay
+const createFocusAnimation = () => {
+    try {
+        // Remove any existing animation
+        const existingAnim = document.getElementById('focus-animation-overlay');
+        if (existingAnim) {
+            existingAnim.parentNode.removeChild(existingAnim);
+        }
+        
+        // Create an overlay element
+        const overlay = document.createElement('div');
+        overlay.id = 'focus-animation-overlay';
+        overlay.style.position = 'fixed';
+        overlay.style.top = '0';
+        overlay.style.left = '0';
+        overlay.style.right = '0';
+        overlay.style.bottom = '0';
+        overlay.style.pointerEvents = 'none';
+        overlay.style.zIndex = '9999';
+        
+        // Add it to the document
+        document.body.appendChild(overlay);
+        
+        // Get the button position
+        const button = document.getElementById('analyze-button');
+        if (!button) return;
+        
+        const rect = button.getBoundingClientRect();
+        
+        // Create a highlight element
+        const highlight = document.createElement('div');
+        highlight.style.position = 'absolute';
+        highlight.style.left = `${rect.left - 10}px`;
+        highlight.style.top = `${rect.top - 10}px`;
+        highlight.style.width = `${rect.width + 20}px`;
+        highlight.style.height = `${rect.height + 20}px`;
+        highlight.style.borderRadius = '8px';
+        highlight.style.border = '3px solid var(--primary-color)';
+        highlight.style.boxShadow = '0 0 0 5000px rgba(0, 0, 0, 0.3)';
+        highlight.style.animation = 'pulse-focus 1.5s ease-in-out 3';
+        
+        // Add the highlight to the overlay
+        overlay.appendChild(highlight);
+        
+        // Remove after animation completes
+        setTimeout(() => {
+            if (document.body.contains(overlay)) {
+                document.body.removeChild(overlay);
+            }
+        }, 5000);
+    } catch (e) {
+        console.error('Error creating focus animation:', e);
+    }
+};
+
+// Add function to toggle debug size
+const toggleDebugSize = () => {
+    debugExpanded.value = !debugExpanded.value;
+    const debugPanel = document.querySelector('.debug');
+    if (debugPanel) {
+        debugPanel.style.maxHeight = debugExpanded.value ? '250px' : '40px';
+    }
+};
+
+// Add function to clear shortcuts history
+const clearShortcuts = () => {
+    globalShortcuts.value = [];
+    lastKeyboardShortcut.value = '';
+    chrome.runtime.sendMessage({ name: 'clear-shortcuts' });
+};
+
+// Add function to focus the question input
+const focusQuestionInput = () => {
+    if (questionTextarea.value) {
+        console.log('Focusing question textarea');
+        nextTick(() => {
+            questionTextarea.value.focus();
+        });
+    }
+};
 </script>
 
 <style scoped>
@@ -1283,6 +1707,8 @@ const handleAsk = () => {
     flex-direction: column;
     height: 100vh;
     width: 100%;
+    /* Add CSS variable for primary color in RGB format for opacity support */
+    --primary-color-rgb: 59, 130, 246;
 }
 
 .header {
@@ -1316,9 +1742,25 @@ const handleAsk = () => {
     background-color: var(--surface-ground);
     border-top: 1px solid var(--surface-border);
     z-index: 1000;
-    max-height: 80px;
+    max-height: 250px; /* Increased from 80px to 250px */
     overflow-y: auto;
     font-family: var(--font-family);
+    transition: max-height 0.3s ease;
+    box-shadow: 0 -3px 10px rgba(0,0,0,0.1);
+}
+
+/* Add a toggle button for debug panel size */
+.debug-toggle {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    background: var(--primary-color);
+    color: white;
+    border-radius: 3px;
+    padding: 2px 5px;
+    opacity: 0.8;
 }
 
 .debug p {
@@ -1326,6 +1768,41 @@ const handleAsk = () => {
     padding: 0.25rem 0.5rem;
     font-size: 0.75rem;
     color: var(--text-color-secondary);
+}
+
+/* Enhance the global shortcuts section */
+.global-shortcuts-section {
+    max-height: 150px;
+    overflow-y: auto;
+    background-color: var(--surface-card);
+    border-radius: 5px;
+    margin: 5px;
+    padding: 5px;
+    border: 1px solid var(--surface-border);
+}
+
+.shortcut-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 3px 8px;
+    border-radius: 3px;
+}
+
+.shortcut-item:nth-child(odd) {
+    background-color: var(--surface-100);
+}
+
+.shortcut-item:hover {
+    background-color: var(--surface-200);
+}
+
+.shortcut-command {
+    font-weight: bold;
+}
+
+.shortcut-time {
+    color: var(--text-color-secondary);
+    font-size: 0.7rem;
 }
 
 /* Update ask-input for textarea */
@@ -1683,5 +2160,56 @@ const handleAsk = () => {
 /* Add styles for debugging item indexes */
 .item-index {
     display: none; /* Hide this completely since we're not using it anymore */
+}
+
+/* Add CSS style for focus highlight */
+.button-focus-highlight {
+    animation: button-pulse 1s ease-in-out 2;
+}
+
+@keyframes button-pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(var(--primary-500), 0.7);
+    }
+    50% {
+        box-shadow: 0 0 10px 0 rgba(var(--primary-500), 0.9);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(var(--primary-500), 0);
+    }
+}
+
+/* Enhance button focus styles */
+button:focus-visible, 
+button:focus {
+    outline: 3px solid var(--primary-color) !important;
+    outline-offset: 3px !important;
+    box-shadow: 0 0 10px rgba(var(--primary-color-rgb), 0.7) !important;
+}
+
+.button-has-focus {
+    outline: 3px solid var(--primary-color) !important;
+    outline-offset: 3px !important;
+    box-shadow: 0 0 15px rgba(var(--primary-color-rgb), 0.9) !important;
+    transform: scale(1.05);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Add a keyframe animation for the focus overlay */
+@keyframes pulse-focus {
+    0% { 
+        opacity: 0.9;
+        box-shadow: 0 0 0 5000px rgba(0, 0, 0, 0.3);
+    }
+    50% { 
+        opacity: 1;
+        box-shadow: 0 0 0 5000px rgba(0, 0, 0, 0.5);
+        border-color: var(--primary-800);
+        border-width: 5px;
+    }
+    100% { 
+        opacity: 0.9;
+        box-shadow: 0 0 0 5000px rgba(0, 0, 0, 0.3);
+    }
 }
 </style>
